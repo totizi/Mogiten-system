@@ -9,8 +9,21 @@ import time
 # 👇 設定エリア
 # ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
-DEFAULT_BUDGET = 30000 
 
+# 💰 クラスごとの予算設定（円）
+CLASS_BUDGETS = {
+    "21HR": 30000,
+    "22HR": 30000,
+    "23HR": 35000,
+    "24HR": 30000,
+    "25HR": 30000,
+    "26HR": 30000,
+    "27HR": 30000,
+    "28HR": 30000,
+    "実行委員": 100000
+}
+
+# 🔐 クラスごとのパスワード
 CLASS_PASSWORDS = {
     "21HR": "2121",
     "22HR": "2222",
@@ -28,14 +41,13 @@ CLASS_PASSWORDS = {
 # ==========================================
 st.set_page_config(page_title="文化祭レジシステム", layout="wide")
 
-# セッション変数の初期化
 if "is_logged_in" not in st.session_state:
     st.session_state["is_logged_in"] = False
 if "logged_class" not in st.session_state:
     st.session_state["logged_class"] = None
 if "cart" not in st.session_state:
     st.session_state["cart"] = []
-# ★追加：お預かり金額を保存する変数
+# お預かり金額用
 if "received_amount" not in st.session_state:
     st.session_state["received_amount"] = 0
 
@@ -90,7 +102,6 @@ def clear_cache():
     load_expense_total.clear()
     load_menu_data.clear()
 
-# --- 🗑️ メニュー削除用 ---
 def delete_menu_item(class_name, item_name):
     sheet = connect_to_tab("MENU")
     if not sheet: return False
@@ -106,7 +117,6 @@ def delete_menu_item(class_name, item_name):
         pass
     return False
 
-# --- ✅ ToDo更新用 ---
 def update_todo_status(row_index):
     sheet = connect_to_tab("TODO")
     if not sheet: return False
@@ -168,10 +178,7 @@ menu = st.sidebar.radio(
 st.sidebar.success(f"ログイン中: **{selected_class}**")
 
 # --- ⚡️ 予算バー ---
-target_budget = CLASS_BUDGETS = {
-    "21HR": 30000, "22HR": 30000, "23HR": 35000, "24HR": 30000,
-    "25HR": 30000, "26HR": 30000, "27HR": 30000, "28HR": 30000, "実行委員": 100000
-}.get(selected_class, 30000)
+target_budget = CLASS_BUDGETS.get(selected_class, 30000)
 
 current_expense = load_expense_total(selected_class)
 remaining = target_budget - current_expense
@@ -185,13 +192,13 @@ else:
 st.divider()
 
 # ==========================================
-# 💰 レジ（高速お釣り計算版）
+# 💰 レジ
 # ==========================================
 if menu == "💰 レジ（売上登録）":
     st.title(f"💰 {selected_class} POSレジ")
     col_menu, col_receipt = st.columns([1.5, 1])
 
-    # --- 左側：メニュー ---
+    # --- 左側：商品メニュー ---
     with col_menu:
         st.subheader("商品を選択")
         menu_items = load_menu_data(selected_class)
@@ -207,12 +214,11 @@ if menu == "💰 レジ（売上登録）":
                         st.session_state["cart"].append({"name": name, "price": price})
                         st.rerun()
 
-    # --- 右側：レシート & お金入力 ---
+    # --- 右側：会計操作 ---
     with col_receipt:
         st.subheader("🧾 会計・お釣り")
         total_price = sum([item['price'] for item in st.session_state["cart"]])
         
-        # カート内容
         with st.expander("カートの中身を確認", expanded=True):
             if not st.session_state["cart"]:
                 st.write("（商品を選んでください）")
@@ -222,29 +228,28 @@ if menu == "💰 レジ（売上登録）":
         st.divider()
         st.metric("合計金額", f"¥{total_price:,}")
         
-        # --- ⚡️ お金入力エリア（ここが進化！） ---
+        # --- ⚡️ お金入力エリア（修正版） ---
         if total_price > 0:
-            st.write("🔻 **お預かり金額を入力**")
+            st.write("🔻 **お預かり金額**")
             
-            # 1. 現在の入力額を表示（手入力も可能）
-            val = st.number_input("預かり金", value=st.session_state["received_amount"], step=100, label_visibility="collapsed")
-            # 手入力された場合の同期
+            # 手入力も可能にする
+            val = st.number_input("預かり金", value=st.session_state["received_amount"], step=10, label_visibility="collapsed")
             if val != st.session_state["received_amount"]:
                 st.session_state["received_amount"] = val
                 st.rerun()
 
-            # 2. 紙幣・硬貨ボタン（押すと即座に加算）
+            # ★ここを変更：数字統一、50円・10円追加、5000円以上削除
             c1, c2, c3 = st.columns(3)
-            c1.button("+1万", on_click=add_money, args=(10000,), use_container_width=True)
-            c2.button("+5千", on_click=add_money, args=(5000,), use_container_width=True)
-            c3.button("+千円", on_click=add_money, args=(1000,), use_container_width=True)
+            c1.button("+1,000", on_click=add_money, args=(1000,), use_container_width=True)
+            c2.button("+500", on_click=add_money, args=(500,), use_container_width=True)
+            c3.button("+100", on_click=add_money, args=(100,), use_container_width=True)
             
             c4, c5, c6 = st.columns(3)
-            c4.button("+500", on_click=add_money, args=(500,), use_container_width=True)
-            c5.button("+100", on_click=add_money, args=(100,), use_container_width=True)
-            c6.button("クリア", on_click=clear_money, use_container_width=True) # 0にする
+            c4.button("+50", on_click=add_money, args=(50,), use_container_width=True)
+            c5.button("+10", on_click=add_money, args=(10,), use_container_width=True)
+            c6.button("クリア", on_click=clear_money, use_container_width=True)
 
-            # 3. お釣り計算結果
+            # お釣り計算
             change = st.session_state["received_amount"] - total_price
             
             if st.session_state["received_amount"] > 0:
@@ -255,7 +260,6 @@ if menu == "💰 レジ（売上登録）":
         
         st.divider()
         
-        # 確定・リセットボタン
         checkout_btn = st.button("お会計（確定）", type="primary", use_container_width=True)
         if st.button("カートを空にする", use_container_width=True):
             st.session_state["cart"] = []
@@ -275,7 +279,7 @@ if menu == "💰 レジ（売上登録）":
                     sheet.append_rows(rows)
                     
                     st.session_state["cart"] = []
-                    st.session_state["received_amount"] = 0 # お金もリセット
+                    st.session_state["received_amount"] = 0
                     st.balloons()
                     st.success("✅ 会計完了！")
                     time.sleep(1)
