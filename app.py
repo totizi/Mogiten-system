@@ -50,6 +50,9 @@ if "cart" not in st.session_state:
 # お預かり金額用
 if "received_amount" not in st.session_state:
     st.session_state["received_amount"] = 0
+# 手入力金額用
+if "manual_price" not in st.session_state:
+    st.session_state["manual_price"] = 0
 
 def get_gspread_client():
     if "service_account_json" not in st.secrets:
@@ -198,9 +201,26 @@ if menu == "💰 レジ（売上登録）":
     st.title(f"💰 {selected_class} POSレジ")
     col_menu, col_receipt = st.columns([1.5, 1])
 
-    # --- 左側：商品メニュー ---
+    # --- 左側：商品メニュー & 手入力 ---
     with col_menu:
-        st.subheader("商品を選択")
+        # ★新機能：金額直接入力エリア
+        st.subheader("📝 金額を指定して追加")
+        with st.expander("金額入力パネルを開く", expanded=True):
+            c_input, c_btn = st.columns([2, 1])
+            with c_input:
+                manual_p = st.number_input("金額（円）", min_value=0, step=10, key="manual_input")
+            with c_btn:
+                st.write("") # レイアウト調整用
+                st.write("")
+                if st.button("カートに追加", use_container_width=True):
+                    if manual_p > 0:
+                        st.session_state["cart"].append({"name": "手入力", "price": manual_p})
+                        st.rerun()
+
+        st.divider()
+        
+        # 既存の商品ボタン
+        st.subheader("🍔 商品ボタン")
         menu_items = load_menu_data(selected_class)
         if not menu_items:
             st.info("「🍔 商品メニュー登録」から商品を登録してください")
@@ -216,29 +236,25 @@ if menu == "💰 レジ（売上登録）":
 
     # --- 右側：会計操作 ---
     with col_receipt:
-        st.subheader("🧾 会計・お釣り")
+        st.subheader("🧾 カート・会計")
         total_price = sum([item['price'] for item in st.session_state["cart"]])
         
-        with st.expander("カートの中身を確認", expanded=True):
+        with st.expander("カートの中身", expanded=True):
             if not st.session_state["cart"]:
-                st.write("（商品を選んでください）")
+                st.write("（空）")
             for item in st.session_state["cart"]:
                 st.text(f"・{item['name']} : ¥{item['price']}")
         
         st.divider()
         st.metric("合計金額", f"¥{total_price:,}")
         
-        # --- ⚡️ お金入力エリア（修正版） ---
         if total_price > 0:
-            st.write("🔻 **お預かり金額**")
-            
-            # 手入力も可能にする
+            st.write("🔻 **お預かり**")
             val = st.number_input("預かり金", value=st.session_state["received_amount"], step=10, label_visibility="collapsed")
             if val != st.session_state["received_amount"]:
                 st.session_state["received_amount"] = val
                 st.rerun()
 
-            # ★ここを変更：数字統一、50円・10円追加、5000円以上削除
             c1, c2, c3 = st.columns(3)
             c1.button("+1,000", on_click=add_money, args=(1000,), use_container_width=True)
             c2.button("+500", on_click=add_money, args=(500,), use_container_width=True)
@@ -249,7 +265,6 @@ if menu == "💰 レジ（売上登録）":
             c5.button("+10", on_click=add_money, args=(10,), use_container_width=True)
             c6.button("クリア", on_click=clear_money, use_container_width=True)
 
-            # お釣り計算
             change = st.session_state["received_amount"] - total_price
             
             if st.session_state["received_amount"] > 0:
@@ -259,7 +274,6 @@ if menu == "💰 レジ（売上登録）":
                     st.error(f"あと ¥{abs(change):,} 足りません")
         
         st.divider()
-        
         checkout_btn = st.button("お会計（確定）", type="primary", use_container_width=True)
         if st.button("カートを空にする", use_container_width=True):
             st.session_state["cart"] = []
@@ -268,7 +282,7 @@ if menu == "💰 レジ（売上登録）":
 
         if checkout_btn and total_price > 0:
             if st.session_state["received_amount"] < total_price and st.session_state["received_amount"] != 0:
-                st.warning("お金が足りていませんが、登録してよろしいですか？")
+                st.warning("お金が足りていません")
             else:
                 sheet = connect_to_tab(selected_class)
                 if sheet:
