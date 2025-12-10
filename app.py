@@ -47,7 +47,6 @@ if "logged_class" not in st.session_state:
     st.session_state["logged_class"] = None
 if "cart" not in st.session_state:
     st.session_state["cart"] = []
-# お預かり金額用
 if "received_amount" not in st.session_state:
     st.session_state["received_amount"] = 0
 
@@ -90,7 +89,9 @@ def load_expense_total(class_name):
         df = pd.DataFrame(data)
         if not df.empty and "金額" in df.columns:
             if "種別" in df.columns:
-                expense_df = df[df["種別"].isin(["経費", "記録"])]
+                # 「経費」という文字が含まれている行だけ合計する（絵文字対策）
+                # なければ0にする
+                expense_df = df[df["種別"].astype(str).str.contains("経費")]
                 return int(expense_df["金額"].sum())
             else:
                 return int(df["金額"].sum())
@@ -171,7 +172,6 @@ if st.sidebar.button("ログアウト"):
     st.session_state["received_amount"] = 0
     st.rerun()
 
-# ★順番変更：経費 -> ToDo -> レジ -> メニュー
 menu = st.sidebar.radio(
     "メニュー",
     ["💸 経費入力（買い出し）", "✅ ToDo掲示板", "💰 レジ（売上登録）", "🍔 商品メニュー登録"],
@@ -206,7 +206,8 @@ if menu == "💸 経費入力（買い出し）":
         if st.form_submit_button("登録"):
             sheet = connect_to_tab(selected_class)
             if sheet:
-                sheet.append_row([date.strftime("%Y/%m/%d"), "経費", person, item, amount])
+                # ★変更点：絵文字を追加して見やすく！
+                sheet.append_row([date.strftime("%Y/%m/%d"), "🔴 経費", person, item, amount])
                 clear_cache()
                 st.success("保存しました")
                 time.sleep(1)
@@ -275,7 +276,7 @@ elif menu == "💰 レジ（売上登録）":
     st.title(f"💰 {selected_class} POSレジ")
     col_menu, col_receipt = st.columns([1.5, 1])
 
-    # --- 左側：商品メニュー (手入力削除済み) ---
+    # --- 左側：商品メニュー ---
     with col_menu:
         st.subheader("🍔 商品を選択")
         menu_items = load_menu_data(selected_class)
@@ -347,8 +348,8 @@ elif menu == "💰 レジ（売上登録）":
                     item_names = [item["name"] for item in st.session_state["cart"]]
                     items_str = ", ".join(item_names)
                     
-                    # 合計金額で1行記録
-                    sheet.append_row([d_str, "売上", "レジ", items_str, total_price])
+                    # ★変更点：絵文字を追加
+                    sheet.append_row([d_str, "🔵 売上", "レジ", items_str, total_price])
                     
                     st.session_state["cart"] = []
                     st.session_state["received_amount"] = 0
