@@ -6,60 +6,34 @@ import gspread
 # --- 設定エリア ---
 SPREADSHEET_NAME = "模擬店データベース"
 
-st.set_page_config(page_title="模擬店会計アプリ", layout="wide")
-st.title("💸 模擬店 経費入力システム (完成版)")
+st.title("🛠️ 接続テストモード")
 
-# --- スプレッドシート接続関数（最新版） ---
+# --- 接続関数 ---
 def connect_to_sheet():
-    # Secretsから鍵を取り出す
+    # Secretsがあるかチェック
+    if "service_account_json" not in st.secrets:
+        st.error("Secretsが設定されていません！")
+        return None
+
     key_dict = json.loads(st.secrets["service_account_json"])
-    
-    # 認証（これだけでOK！）
+    # 这里的 gspread 版本如果是 6.0.0 以上可能会出问题，但在 debug 模式下我们要看原生报错
     gc = gspread.service_account_from_dict(key_dict)
-    
-    # シートを開く
     sh = gc.open(SPREADSHEET_NAME)
     return sh.sheet1
 
-# --- 入力フォーム ---
-st.header("📝 新しいレシートを入力")
-with st.form("input_form"):
-    date = st.date_input("購入日", datetime.now())
-    buyer = st.selectbox("購入者", ["自分", "Aさん", "Bさん", "Cさん", "先生"])
-    item_name = st.text_input("品名")
-    amount = st.number_input("金額（円）", min_value=0, step=1)
+# --- テスト実行ボタン ---
+if st.button("テスト送信（ガードなし）"):
+    st.write("接続を開始します...")
     
-    submitted = st.form_submit_button("登録する")
-
-    if submitted:
-        try:
-            sheet = connect_to_sheet()
-            date_str = date.strftime("%Y/%m/%d")
-            
-            # データを追加
-            sheet.append_row([date_str, buyer, item_name, amount])
-            
-            st.success("✅ スプレッドシートに保存しました！")
-            st.balloons()
-            
-            st.warning("👇 本当にここに書き込まれているか、クリックして確認してください！")
-            st.write(f"書き込み先URL: {sheet.url}")
-            # --- デバッグ用（どこに書き込んだか表示） ---
-            st.info(f"書き込み先: {SPREADSHEET_NAME}")
-            
-        except Exception as e:
-            st.error(f"エラーが発生しました: {e}")
-            # もし詳細なエラーがあれば表示
-            if hasattr(e, 'response'):
-                st.write(e.response.text)
-
-# --- 履歴表示 ---
-st.divider()
-st.header("📊 履歴")
-if st.button("最新データを読み込む"):
-    try:
-        sheet = connect_to_sheet()
-        data = sheet.get_all_values() # 単純なリストとして取得
-        st.dataframe(data)
-    except Exception as e:
-        st.error("読み込み失敗")
+    # ★ここから try-except を外しています！
+    # エラーが起きるとここでアプリが止まり、詳細が表示されます
+    
+    sheet = connect_to_sheet()
+    st.write("シートを開けました！書き込みを試みます...")
+    
+    date_str = datetime.now().strftime("%Y/%m/%d")
+    
+    # テストデータを書き込み
+    sheet.append_row([date_str, "テスト君", "接続テスト", 100])
+    
+    st.success("✅ 書き込み成功！スプレッドシートを確認してください。")
