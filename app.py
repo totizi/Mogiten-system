@@ -6,38 +6,16 @@ import pandas as pd
 import time
 
 # ==========================================
-# ⚙️ 設定エリア（ここを変更すれば反映されます）
+# ⚙️ 設定エリア
 # ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
 
-# 💰 クラスごとの予算設定（円）
-# ★ここでクラスごとの予算を自由に設定できます！
-CLASS_BUDGETS = {
-    "21HR": 30000,
-    "22HR": 30000,
-    "23HR": 35000, # 例: 23HRだけ少し多くする
-    "24HR": 30000,
-    "25HR": 30000,
-    "26HR": 30000,
-    "27HR": 30000,
-    "28HR": 30000
-}
-
 # 🔐 クラスごとのパスワード
 CLASS_PASSWORDS = {
-    "21HR": "2121",
-    "22HR": "2222",
-    "23HR": "2323",
-    "24HR": "2424",
-    "25HR": "2525",
-    "26HR": "2626",
-    "27HR": "2727",
-    "28HR": "2828"
+    "21HR": "2121", "22HR": "2222", "23HR": "2323", "24HR": "2424",
+    "25HR": "2525", "26HR": "2626", "27HR": "2727", "28HR": "2828"
 }
 
-# ==========================================
-# 🛠️ アプリ本体の処理
-# ==========================================
 st.set_page_config(page_title="文化祭レジシステム", layout="wide")
 
 # セッション初期化
@@ -48,6 +26,9 @@ default_state = {
 for key, val in default_state.items():
     if key not in st.session_state: st.session_state[key] = val
 
+# ==========================================
+# 🛠️ 共通関数（バックエンド処理）
+# ==========================================
 def get_worksheet(tab_name):
     """シート接続用"""
     if "service_account_json" not in st.secrets:
@@ -70,9 +51,10 @@ def load_data(tab_name):
 def clear_cache():
     """キャッシュ削除"""
     load_data.clear()
+    get_class_budget.clear() # 予算のキャッシュも消す
 
 def add_row_to_sheet(tab_name, row_data, success_msg="保存しました"):
-    """データ追加・キャッシュクリア・再起動を一括処理"""
+    """データ追加共通処理"""
     sheet = get_worksheet(tab_name)
     if sheet:
         sheet.append_row(row_data)
@@ -81,12 +63,48 @@ def add_row_to_sheet(tab_name, row_data, success_msg="保存しました"):
         time.sleep(1)
         st.rerun()
 
+# --- 💰 予算管理用の新関数 ---
+@st.cache_data(ttl=600)
+def get_class_budget(class_name):
+    """スプレッドシートから予算を読み込む（なければ30000を返す）"""
+    sheet = get_worksheet("BUDGET")
+    if not sheet: return 30000
+    try:
+        records = sheet.get_all_records()
+        df = pd.DataFrame(records)
+        if not df.empty and "クラス" in df.columns:
+            # そのクラスの行を探す
+            row = df[df["クラス"] == class_name]
+            if not row.empty:
+                return int(row.iloc[0]["予算"])
+    except: pass
+    return 30000 # デフォルト値
+
+def update_class_budget(class_name, new_budget):
+    """予算を更新する（あれば上書き、なければ追加）"""
+    sheet = get_worksheet("BUDGET")
+    if not sheet: return
+    try:
+        cell = sheet.find(class_name)
+        if cell:
+            # 既にある場合は、その隣のセル（B列）を更新
+            sheet.update_cell(cell.row, 2, new_budget)
+        else:
+            # ない場合は新規追加
+            sheet.append_row([class_name, new_budget])
+        
+        clear_cache() # キャッシュを消して即反映
+        st.success(f"予算を {new_budget:,} 円に設定しました！")
+        time.sleep(1)
+        st.rerun()
+    except Exception as e:
+        st.error(f"保存エラー: {e}")
+
 # ==========================================
 # 🏫 サイドバー & ログイン
 # ==========================================
 st.sidebar.title("🏫 クラスログイン")
-# 設定にあるクラスだけを選択肢にする（実行委員は削除済み）
-selected_class = st.sidebar.selectbox("クラス選択", list(CLASS_BUDGETS.keys()))
+selected_class = st.sidebar.selectbox("クラス選択", list(CLASS_PASSWORDS.keys()))
 
 # クラス切り替え時のリセット処理
 if st.session_state["logged_class"] != selected_class:
@@ -113,17 +131,18 @@ if st.sidebar.button("ログアウト"):
     st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0})
     st.rerun()
 
-menu = st.sidebar.radio("メニュー", ["💸 経費入力（買い出し）", "✅ ToDo掲示板", "💰 レジ（売上登録）", "🍔 商品メニュー登録"])
+# ★メニューに「予算設定」を追加
+menu = st.sidebar.radio("メニュー", ["💸 経費入力（買い出し）", "✅ ToDo掲示板", "💰 レジ（売上登録）", "🍔 商品メニュー登録", "⚙️ 予算設定"])
 st.sidebar.success(f"ログイン中: **{selected_class}**")
 
-# --- 📊 予算バー表示（クラスごとの設定を反映） ---
-budget = CLASS_BUDGETS.get(selected_class, 30000)
+# --- 📊 予算バー表示（DBから取得） ---
+budget = get_class_budget(selected_class) # ここが変わりました！
+
 records = load_data(selected_class)
 df = pd.DataFrame(records)
 current_expense = 0
 if not df.empty and "金額" in df.columns:
     if "種別" in df.columns:
-        # "経費"という文字を含む行のみ合計
         current_expense = df[df["種別"].astype(str).str.contains("経費")]["金額"].sum()
     else:
         current_expense = df["金額"].sum()
@@ -191,7 +210,7 @@ elif menu == "✅ ToDo掲示板":
 # 💰 レジ（売上登録）
 # ==========================================
 elif menu == "💰 レジ（売上登録）":
-    st.title(f"💰 {selected_class} レジ") # POS表記を削除
+    st.title(f"💰 {selected_class} レジ")
     c_menu, c_receipt = st.columns([1.5, 1])
 
     with c_menu:
@@ -268,3 +287,18 @@ elif menu == "🍔 商品メニュー登録":
                 for idx, row in enumerate(rows):
                     if idx > 0 and row[0] == selected_class and row[1] == item['商品名']:
                         sheet.delete_rows(idx + 1); clear_cache(); st.success("削除しました"); time.sleep(0.5); st.rerun()
+
+# ==========================================
+# ⚙️ 予算設定（新機能）
+# ==========================================
+elif menu == "⚙️ 予算設定":
+    st.title(f"⚙️ {selected_class} 予算設定")
+    st.caption("クラスの予算を変更できます。")
+
+    # 現在の予算を表示
+    current_b = get_class_budget(selected_class)
+    
+    with st.form("budget_form"):
+        new_budget = st.number_input("新しい予算（円）", value=current_b, step=1000)
+        if st.form_submit_button("保存する"):
+            update_class_budget(selected_class, new_budget)
