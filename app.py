@@ -9,8 +9,22 @@ import time
 # 👇 設定エリア
 # ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
-DEFAULT_BUDGET = 30000 
 
+# 💰 クラスごとの予算設定（円）
+# ★ここを自由に変えてください！
+CLASS_BUDGETS = {
+    "21HR": 30000,
+    "22HR": 30000,
+    "23HR": 35000, # 例：23HRだけ多めにする
+    "24HR": 30000,
+    "25HR": 30000,
+    "26HR": 30000,
+    "27HR": 30000,
+    "28HR": 30000,
+    "実行委員": 100000 # 実行委員は多め
+}
+
+# 🔐 クラスごとのパスワード設定
 CLASS_PASSWORDS = {
     "21HR": "2121",
     "22HR": "2222",
@@ -24,7 +38,7 @@ CLASS_PASSWORDS = {
 }
 
 # ==========================================
-# ⚙️ アプリ初期設定
+# ⚙️ アプリ初期設定 & キャッシュ関数
 # ==========================================
 st.set_page_config(page_title="文化祭レジシステム", layout="wide")
 
@@ -35,7 +49,6 @@ if "logged_class" not in st.session_state:
 if "cart" not in st.session_state:
     st.session_state["cart"] = []
 
-# --- 接続関数（ここも少し工夫） ---
 def get_gspread_client():
     if "service_account_json" not in st.secrets:
         st.error("Secretsの設定がありません")
@@ -51,8 +64,7 @@ def connect_to_tab(tab_name):
     except Exception as e:
         return None
 
-# --- ⚡️【重要】データをキャッシュする関数（通信節約） ---
-# ttl=600 は「600秒間（10分）はデータを覚えておく」という意味
+# --- キャッシュ関数 ---
 @st.cache_data(ttl=600)
 def load_menu_data(class_name):
     sheet = connect_to_tab("MENU")
@@ -67,7 +79,6 @@ def load_menu_data(class_name):
         pass
     return []
 
-# 予算計算用データは30秒に1回だけ更新（ttl=30）
 @st.cache_data(ttl=30)
 def load_expense_total(class_name):
     sheet = connect_to_tab(class_name)
@@ -77,7 +88,6 @@ def load_expense_total(class_name):
         df = pd.DataFrame(data)
         if not df.empty and "金額" in df.columns:
             if "種別" in df.columns:
-                # 経費と記録だけを合計
                 expense_df = df[df["種別"].isin(["経費", "記録"])]
                 return int(expense_df["金額"].sum())
             else:
@@ -86,10 +96,33 @@ def load_expense_total(class_name):
         pass
     return 0
 
-# キャッシュを強制的にクリアする関数（書き込み直後用）
 def clear_cache():
     load_expense_total.clear()
     load_menu_data.clear()
+
+def delete_menu_item(class_name, item_name):
+    sheet = connect_to_tab("MENU")
+    if not sheet: return False
+    try:
+        rows = sheet.get_all_values()
+        for i, row in enumerate(rows):
+            if i == 0: continue
+            if row[0] == class_name and row[1] == item_name:
+                sheet.delete_rows(i + 1)
+                clear_cache()
+                return True
+    except:
+        pass
+    return False
+
+def update_todo_status(row_index):
+    sheet = connect_to_tab("TODO")
+    if not sheet: return False
+    try:
+        sheet.update_cell(row_index, 5, "完了")
+        return True
+    except:
+        return False
 
 # ==========================================
 # 🏫 サイドバー & ログイン
@@ -133,21 +166,24 @@ menu = st.sidebar.radio(
 )
 st.sidebar.success(f"ログイン中: **{selected_class}**")
 
-# --- ⚡️ 予算バー（キャッシュ利用版） ---
-current_expense = load_expense_total(selected_class)
-remaining = DEFAULT_BUDGET - current_expense
-progress_val = min(current_expense / DEFAULT_BUDGET, 1.0)
+# --- ⚡️ 予算バー（クラス別予算に対応） ---
+# そのクラスの予算を取得（設定がなければ30000円）
+target_budget = CLASS_BUDGETS.get(selected_class, 30000)
 
-st.write(f"📊 **予算状況** (予算: {DEFAULT_BUDGET:,}円)")
+current_expense = load_expense_total(selected_class)
+remaining = target_budget - current_expense
+progress_val = min(current_expense / target_budget, 1.0)
+
+st.write(f"📊 **予算状況** (予算: {target_budget:,}円)")
 st.progress(progress_val)
 if remaining < 0:
     st.error(f"⚠️ **{abs(remaining):,} 円の赤字です！**")
 else:
-    st.caption(f"使用済み: {current_expense:,}円 / **残り: {remaining:,}円** (※更新は30秒毎)")
+    st.caption(f"使用済み: {current_expense:,}円 / **残り: {remaining:,}円**")
 st.divider()
 
 # ==========================================
-# 💰 レジ（売上登録）
+# 💰 レジ
 # ==========================================
 if menu == "💰 レジ（売上登録）":
     st.title(f"💰 {selected_class} POSレジ")
@@ -155,9 +191,7 @@ if menu == "💰 レジ（売上登録）":
 
     with col_menu:
         st.subheader("商品を選択")
-        # ★キャッシュを使って読み込むので高速＆エラーなし！
         menu_items = load_menu_data(selected_class)
-
         if not menu_items:
             st.info("サイドバーの「🍔 商品メニュー登録」から商品を登録してください")
         else:
@@ -171,15 +205,24 @@ if menu == "💰 レジ（売上登録）":
                         st.rerun()
 
     with col_receipt:
-        st.subheader("🧾 お会計リスト")
+        st.subheader("🧾 お会計")
         total_price = sum([item['price'] for item in st.session_state["cart"]])
-        
         for item in st.session_state["cart"]:
             st.text(f"・{item['name']} : ¥{item['price']}")
-        
         st.divider()
         st.metric("合計金額", f"¥{total_price:,}")
         
+        if total_price > 0:
+            st.write("--- お釣り計算 ---")
+            received = st.number_input("お預かり金額", min_value=0, step=100)
+            if received > 0:
+                change = received - total_price
+                if change >= 0:
+                    st.metric("お釣り", f"¥{change:,}", delta="返す金額")
+                else:
+                    st.error(f"足りません！あと {abs(change):,} 円")
+
+        st.divider()
         checkout_btn = st.button("お会計（確定）", type="primary", use_container_width=True)
         if st.button("リセット", use_container_width=True):
             st.session_state["cart"] = []
@@ -192,7 +235,6 @@ if menu == "💰 レジ（売上登録）":
                 d_str = datetime.now().strftime("%Y/%m/%d")
                 for item in st.session_state["cart"]:
                     rows.append([d_str, "売上", "レジ", item["name"], item["price"]])
-                
                 sheet.append_rows(rows)
                 st.session_state["cart"] = []
                 st.success("✅ 会計完了！")
@@ -209,12 +251,11 @@ elif menu == "💸 経費入力（買い出し）":
         person = st.text_input("担当者")
         item = st.text_input("品名")
         amount = st.number_input("金額", min_value=0, step=1)
-        
         if st.form_submit_button("登録"):
             sheet = connect_to_tab(selected_class)
             if sheet:
                 sheet.append_row([date.strftime("%Y/%m/%d"), "経費", person, item, amount])
-                clear_cache() # 書き込んだのでキャッシュを消して即反映
+                clear_cache()
                 st.success("保存しました")
                 time.sleep(1)
                 st.rerun()
@@ -228,50 +269,103 @@ elif menu == "🍔 商品メニュー登録":
         col1, col2 = st.columns(2)
         new_item = col1.text_input("商品名")
         new_price = col2.number_input("単価", min_value=0, step=10)
-        
         if st.form_submit_button("追加"):
             sheet = connect_to_tab("MENU")
             if sheet:
                 sheet.append_row([selected_class, new_item, new_price])
-                clear_cache() # メニューが変わったのでキャッシュクリア
+                clear_cache()
                 st.success(f"「{new_item}」を追加しました")
                 time.sleep(1)
                 st.rerun()
-    
     st.divider()
-    st.subheader("📋 現在のメニュー")
-    items = load_menu_data(selected_class) # ここもキャッシュ利用
+    st.subheader("📋 メニュー編集")
+    items = load_menu_data(selected_class)
     if items:
-        st.table(pd.DataFrame(items)[["商品名", "単価"]])
+        for i, item in enumerate(items):
+            col_txt, col_btn = st.columns([3, 1])
+            with col_txt:
+                st.write(f"・**{item['商品名']}** : ¥{item['単価']}")
+            with col_btn:
+                if st.button("削除", key=f"del_{i}"):
+                    if delete_menu_item(selected_class, item["商品名"]):
+                        st.success("削除しました")
+                        time.sleep(0.5)
+                        st.rerun()
+    else:
+        st.info("登録されている商品はありません")
 
 # ==========================================
-# ✅ ToDo掲示板
+# ✅ ToDo掲示板（チェックボックス機能付き）
 # ==========================================
 elif menu == "✅ ToDo掲示板":
     st.title(f"✅ {selected_class} ToDo掲示板")
     target_tab = "TODO"
 
-    with st.expander("➕ 新しい書き込み", expanded=True):
+    with st.expander("➕ 新しいタスクを追加", expanded=True):
         with st.form("todo_add"):
-            task = st.text_input("内容")
+            task = st.text_input("内容（やるべきこと）")
             person = st.text_input("担当者")
             if st.form_submit_button("書き込む"):
                 sheet = connect_to_tab(target_tab)
                 if sheet:
                     sheet.append_row([selected_class, datetime.now().strftime("%Y/%m/%d"), task, person, "未完了"])
                     st.success("書き込みました")
+                    time.sleep(1)
+                    st.rerun()
 
     st.divider()
     sheet = connect_to_tab(target_tab)
     if sheet:
         try:
-            data = sheet.get_all_records()
-            df = pd.DataFrame(data)
-            if not df.empty and "クラス" in df.columns:
-                my_todos = df[df["クラス"] == selected_class]
-                if not my_todos.empty:
-                    st.table(my_todos.iloc[::-1][["登録日", "やるべきこと", "担当者", "状態"]])
+            all_rows = sheet.get_all_values()
+            my_active_tasks = [] 
+            my_done_tasks = []
+
+            for i, row in enumerate(all_rows):
+                if i == 0: continue 
+                if len(row) >= 5 and row[0] == selected_class:
+                    task_info = {
+                        "row_index": i + 1,
+                        "date": row[1],
+                        "task": row[2],
+                        "person": row[3],
+                        "status": row[4]
+                    }
+                    if "未完了" in row[4]:
+                        my_active_tasks.append(task_info)
+                    else:
+                        my_done_tasks.append(task_info)
+
+            st.subheader("🔥 未完了タスク")
+            if my_active_tasks:
+                st.info("完了したタスクにチェックを入れて「完了にする」ボタンを押してください")
+                tasks_to_complete = []
+
+                for task in my_active_tasks:
+                    is_checked = st.checkbox(f"**{task['task']}** (担当: {task['person']})", key=f"chk_{task['row_index']}")
+                    if is_checked:
+                        tasks_to_complete.append(task['row_index'])
+                
+                if tasks_to_complete:
+                    if st.button("チェックしたタスクを「完了」にする"):
+                        progress_bar = st.progress(0)
+                        for idx, row_idx in enumerate(tasks_to_complete):
+                            update_todo_status(row_idx)
+                            progress_bar.progress((idx + 1) / len(tasks_to_complete))
+                            time.sleep(1)
+                        st.success("更新しました！")
+                        time.sleep(1)
+                        st.rerun()
+            else:
+                st.write("現在、未完了のタスクはありません👏")
+
+            st.divider()
+            with st.expander("✅ 完了済みのタスクを見る"):
+                if my_done_tasks:
+                    for task in reversed(my_done_tasks):
+                        st.write(f"・~~{task['task']}~~ (担当: {task['person']}) - {task['date']}")
                 else:
-                    st.info("書き込みはありません")
-        except:
-            pass
+                    st.write("まだ完了したタスクはありません")
+
+        except Exception as e:
+            st.error(f"読み込みエラー: {e}")
