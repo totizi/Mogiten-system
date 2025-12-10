@@ -3,13 +3,37 @@ from datetime import datetime
 import json
 import gspread
 import pandas as pd
+import time
 
 # ==========================================
-# 👇 スプレッドシートのファイル名
+# 👇 設定エリア
+# ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
-# ==========================================
 
+# 🔐 クラスごとのパスワード設定
+# 好きな数字や文字に変えてください
+CLASS_PASSWORDS = {
+    "21HR": "2121",
+    "22HR": "2222",
+    "23HR": "2323",
+    "24HR": "2424",
+    "25HR": "2525",
+    "26HR": "2626",
+    "27HR": "2727",
+    "28HR": "2828",
+    "実行委員": "admin"
+}
+
+# ==========================================
+# ⚙️ アプリ初期設定
+# ==========================================
 st.set_page_config(page_title="文化祭統合システム", layout="wide")
+
+# セッション状態の初期化（ログイン状態を管理するメモリ）
+if "is_logged_in" not in st.session_state:
+    st.session_state["is_logged_in"] = False
+if "logged_class" not in st.session_state:
+    st.session_state["logged_class"] = None
 
 # --- 共通：指定した名前のタブに接続する関数 ---
 def connect_to_tab(tab_name):
@@ -31,24 +55,68 @@ def connect_to_tab(tab_name):
         return None
 
 # ==========================================
-# 📱 サイドバー（設定・メニュー）
+# 📱 サイドバー（クラス選択）
 # ==========================================
-st.sidebar.title("🏫 クラス選択")
+st.sidebar.title("🏫 クラスログイン")
 
 # クラスリスト
 class_list = ["21HR", "22HR", "23HR", "24HR", "25HR", "26HR", "27HR", "28HR", "実行委員"]
-selected_class = st.sidebar.selectbox("自分のクラスを選んでください", class_list)
+selected_class = st.sidebar.selectbox("クラスを選んでください", class_list)
+
+# --- 重要：クラスを変えたら自動でログアウトする処理 ---
+if st.session_state["logged_class"] != selected_class:
+    st.session_state["is_logged_in"] = False
+    st.session_state["logged_class"] = selected_class
 
 st.sidebar.divider()
 
-# メニュー選択（シンプルに2つ＋確認）
+# ==========================================
+# 🔐 ログイン制御（ここが関所！）
+# ==========================================
+
+# まだログインしていない場合
+if not st.session_state["is_logged_in"]:
+    st.title(f"🔒 {selected_class} ログイン")
+    st.write("このクラスのデータにアクセスするにはパスワードが必要です。")
+    
+    # パスワード入力フォーム
+    with st.form("login_form"):
+        input_pass = st.text_input("パスワードを入力", type="password") # 文字を隠す
+        login_btn = st.form_submit_button("ログイン")
+        
+        if login_btn:
+            # パスワードチェック
+            correct_pass = CLASS_PASSWORDS.get(selected_class)
+            
+            if input_pass == correct_pass:
+                st.session_state["is_logged_in"] = True
+                st.success("ログイン成功！")
+                time.sleep(0.5) # ちょっと待ってから
+                st.rerun() # 画面を再読み込みして中身を表示
+            else:
+                st.error("パスワードが違います")
+    
+    # ログインしていないときはここで処理終了（下を表示しない）
+    st.stop()
+
+
+# ==========================================
+# 🎉 ここから下はログイン成功した人だけが見れるエリア
+# ==========================================
+
+# ログアウトボタン
+if st.sidebar.button("ログアウト"):
+    st.session_state["is_logged_in"] = False
+    st.rerun()
+
+# メニュー選択
 menu = st.sidebar.radio(
     "メニュー",
     ["💰 会計記録（入力）", "✅ ToDo掲示板", "📊 履歴確認"],
     captions=["レシート入力はこちら", "連絡事項はこちら", "データを見る"]
 )
 
-st.sidebar.info(f"操作中: **{selected_class}**")
+st.sidebar.success(f"ログイン中: **{selected_class}**")
 
 
 # ==========================================
@@ -64,7 +132,6 @@ if menu == "💰 会計記録（入力）":
         item = st.text_input("内容（なにに使った？）")
         amount = st.number_input("金額（円）", min_value=0, step=1)
         
-        # 備考（メモ）もあると便利かも
         submitted = st.form_submit_button("記録する")
 
         if submitted:
@@ -81,8 +148,6 @@ if menu == "💰 会計記録（入力）":
 # ==========================================
 elif menu == "✅ ToDo掲示板":
     st.title(f"✅ {selected_class} ToDo掲示板")
-    st.caption("クラスへの連絡、買うものリスト、タスクなどを共有しよう！")
-
     target_tab = "TODO"
 
     # --- 新規追加フォーム ---
@@ -117,7 +182,6 @@ elif menu == "✅ ToDo掲示板":
                 my_todos = df[df["クラス"] == selected_class]
                 
                 if not my_todos.empty:
-                    # 最新が上に来るように逆順にする
                     my_todos = my_todos.iloc[::-1]
                     st.table(my_todos[["登録日", "やるべきこと", "担当者", "状態"]])
                 else:
@@ -134,23 +198,3 @@ elif menu == "📊 履歴確認":
     st.title(f"📊 {selected_class} 利用履歴")
     
     if st.button("最新データを読み込む"):
-        sheet = connect_to_tab(selected_class)
-        if sheet:
-            try:
-                data = sheet.get_all_records()
-                df = pd.DataFrame(data)
-
-                if not df.empty:
-                    # 金額の合計を計算
-                    total_amount = df["金額"].sum()
-
-                    # 合計を大きく表示
-                    st.metric("💸 現在の合計使用金額", f"{total_amount:,} 円")
-                    
-                    st.divider()
-                    st.write("📋 履歴一覧")
-                    st.dataframe(df)
-                else:
-                    st.warning("まだ記録がありません")
-            except Exception as e:
-                st.error(f"読み込みエラー: {e}")
