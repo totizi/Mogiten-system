@@ -1,33 +1,27 @@
 import streamlit as st
-import pandas as pd
 from datetime import datetime
 import json
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 # --- 設定エリア ---
-# スプレッドシートの名前（作ったファイル名と完全に一致させること！）
 SPREADSHEET_NAME = "模擬店データベース"
 
-# ページ設定
 st.set_page_config(page_title="模擬店会計アプリ", layout="wide")
-st.title("💸 模擬店 経費入力システム (Excel連携版)")
+st.title("💸 模擬店 経費入力システム (完成版)")
 
-# --- スプレッドシートに接続する関数（おまじない） ---
+# --- スプレッドシート接続関数（最新版） ---
 def connect_to_sheet():
-    # Secretsから鍵情報を取り出す
+    # Secretsから鍵を取り出す
     key_dict = json.loads(st.secrets["service_account_json"])
     
-    # 認証の設定
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
-    client = gspread.authorize(creds)
+    # 認証（これだけでOK！）
+    gc = gspread.service_account_from_dict(key_dict)
     
     # シートを開く
-    sheet = client.open(SPREADSHEET_NAME).sheet1
-    return sheet
+    sh = gc.open(SPREADSHEET_NAME)
+    return sh.sheet1
 
-# --- 機能1: 経費の入力フォーム ---
+# --- 入力フォーム ---
 st.header("📝 新しいレシートを入力")
 with st.form("input_form"):
     date = st.date_input("購入日", datetime.now())
@@ -39,45 +33,31 @@ with st.form("input_form"):
 
     if submitted:
         try:
-            # スプレッドシートに接続
             sheet = connect_to_sheet()
-            
-            # 日付を文字列に変換
             date_str = date.strftime("%Y/%m/%d")
             
-            # データを追加（行の一番下に追加される）
+            # データを追加
             sheet.append_row([date_str, buyer, item_name, amount])
             
-            st.info(f"このシートに書き込みました: {sheet.title}")
-            st.write(f"シートのURL: {sheet.url}")  # URLを表示させる
             st.success("✅ スプレッドシートに保存しました！")
-            st.balloons() # 風船を飛ばす演出
+            st.balloons()
+            
+            # --- デバッグ用（どこに書き込んだか表示） ---
+            st.info(f"書き込み先: {SPREADSHEET_NAME}")
             
         except Exception as e:
             st.error(f"エラーが発生しました: {e}")
+            # もし詳細なエラーがあれば表示
+            if hasattr(e, 'response'):
+                st.write(e.response.text)
 
-# --- 機能2: リアルタイム履歴表示 ---
+# --- 履歴表示 ---
 st.divider()
-st.header("📊 スプレッドシートの中身")
-
-# ボタンを押したときだけ読み込む（通信節約）
+st.header("📊 履歴")
 if st.button("最新データを読み込む"):
     try:
         sheet = connect_to_sheet()
-        # 全データを取得
-        data = sheet.get_all_records()
-        
-        if data:
-            df = pd.DataFrame(data)
-            st.dataframe(df, use_container_width=True)
-            
-            # 合計金額の計算
-            if "金額" in df.columns:
-                total = df["金額"].sum()
-                st.metric("現在の経費合計", f"{total:,} 円")
-        else:
-            st.info("データはまだありません。")
-            
+        data = sheet.get_all_values() # 単純なリストとして取得
+        st.dataframe(data)
     except Exception as e:
-        st.warning("データの読み込みに失敗しました。まだ1行目にヘッダー（日付、購入者...）がない可能性があります。")
-        st.info("💡 ヒント: スプレッドシートの1行目に手動で「日付」「購入者」「品名」「金額」と入力してみてください。")
+        st.error("読み込み失敗")
