@@ -1,2 +1,2 @@
 streamlit
-gspread
+gspread==5.12.4
