@@ -48,6 +48,8 @@ with st.form("input_form"):
             # データを追加（行の一番下に追加される）
             sheet.append_row([date_str, buyer, item_name, amount])
             
+            st.info(f"このシートに書き込みました: {sheet.title}")
+            st.write(f"シートのURL: {sheet.url}")  # URLを表示させる
             st.success("✅ スプレッドシートに保存しました！")
             st.balloons() # 風船を飛ばす演出
             
