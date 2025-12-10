@@ -50,9 +50,6 @@ if "cart" not in st.session_state:
 # お預かり金額用
 if "received_amount" not in st.session_state:
     st.session_state["received_amount"] = 0
-# 手入力金額用
-if "manual_price" not in st.session_state:
-    st.session_state["manual_price"] = 0
 
 def get_gspread_client():
     if "service_account_json" not in st.secrets:
@@ -203,14 +200,14 @@ if menu == "💰 レジ（売上登録）":
 
     # --- 左側：商品メニュー & 手入力 ---
     with col_menu:
-        # ★新機能：金額直接入力エリア
+        # 手入力エリア
         st.subheader("📝 金額を指定して追加")
         with st.expander("金額入力パネルを開く", expanded=True):
             c_input, c_btn = st.columns([2, 1])
             with c_input:
                 manual_p = st.number_input("金額（円）", min_value=0, step=10, key="manual_input")
             with c_btn:
-                st.write("") # レイアウト調整用
+                st.write("") 
                 st.write("")
                 if st.button("カートに追加", use_container_width=True):
                     if manual_p > 0:
@@ -219,7 +216,7 @@ if menu == "💰 レジ（売上登録）":
 
         st.divider()
         
-        # 既存の商品ボタン
+        # ボタンエリア
         st.subheader("🍔 商品ボタン")
         menu_items = load_menu_data(selected_class)
         if not menu_items:
@@ -286,16 +283,20 @@ if menu == "💰 レジ（売上登録）":
             else:
                 sheet = connect_to_tab(selected_class)
                 if sheet:
-                    rows = []
                     d_str = datetime.now().strftime("%Y/%m/%d")
-                    for item in st.session_state["cart"]:
-                        rows.append([d_str, "売上", "レジ", item["name"], item["price"]])
-                    sheet.append_rows(rows)
+                    
+                    # ★ここを変更：商品をまとめて1行にする
+                    # カートの商品名を連結（例：焼きそば, フランクフルト）
+                    item_names = [item["name"] for item in st.session_state["cart"]]
+                    items_str = ", ".join(item_names)
+                    
+                    # 1行だけ追加（合計金額）
+                    sheet.append_row([d_str, "売上", "レジ", items_str, total_price])
                     
                     st.session_state["cart"] = []
                     st.session_state["received_amount"] = 0
                     st.balloons()
-                    st.success("✅ 会計完了！")
+                    st.success("✅ 売上を記録しました！")
                     time.sleep(1)
                     st.rerun()
 
