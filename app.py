@@ -6,21 +6,41 @@ import pandas as pd
 import time
 
 # ==========================================
-# ⚙️ 設定 & 定数
+# ⚙️ 設定エリア（ここを変更すれば反映されます）
 # ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
+
+# 💰 クラスごとの予算設定（円）
+# ★ここでクラスごとの予算を自由に設定できます！
 CLASS_BUDGETS = {
-    "21HR": 30000, "22HR": 30000, "23HR": 35000, "24HR": 30000,
-    "25HR": 30000, "26HR": 30000, "27HR": 30000, "28HR": 30000, "実行委員": 100000
-}
-CLASS_PASSWORDS = {
-    "21HR": "2121", "22HR": "2222", "23HR": "2323", "24HR": "2424",
-    "25HR": "2525", "26HR": "2626", "27HR": "2727", "28HR": "2828", "実行委員": "admin"
+    "21HR": 30000,
+    "22HR": 30000,
+    "23HR": 35000, # 例: 23HRだけ少し多くする
+    "24HR": 30000,
+    "25HR": 30000,
+    "26HR": 30000,
+    "27HR": 30000,
+    "28HR": 30000
 }
 
+# 🔐 クラスごとのパスワード
+CLASS_PASSWORDS = {
+    "21HR": "2121",
+    "22HR": "2222",
+    "23HR": "2323",
+    "24HR": "2424",
+    "25HR": "2525",
+    "26HR": "2626",
+    "27HR": "2727",
+    "28HR": "2828"
+}
+
+# ==========================================
+# 🛠️ アプリ本体の処理
+# ==========================================
 st.set_page_config(page_title="文化祭レジシステム", layout="wide")
 
-# セッション初期化（まとめて設定）
+# セッション初期化
 default_state = {
     "is_logged_in": False, "logged_class": None, 
     "cart": [], "received_amount": 0
@@ -28,11 +48,8 @@ default_state = {
 for key, val in default_state.items():
     if key not in st.session_state: st.session_state[key] = val
 
-# ==========================================
-# 🛠️ 共通関数（バックエンド処理）
-# ==========================================
 def get_worksheet(tab_name):
-    """シート接続用（エラーハンドリング共通化）"""
+    """シート接続用"""
     if "service_account_json" not in st.secrets:
         st.error("Secrets設定エラー"); return None
     try:
@@ -55,7 +72,7 @@ def clear_cache():
     load_data.clear()
 
 def add_row_to_sheet(tab_name, row_data, success_msg="保存しました"):
-    """【共通化】データ追加・キャッシュクリア・再起動を一括処理"""
+    """データ追加・キャッシュクリア・再起動を一括処理"""
     sheet = get_worksheet(tab_name)
     if sheet:
         sheet.append_row(row_data)
@@ -68,6 +85,7 @@ def add_row_to_sheet(tab_name, row_data, success_msg="保存しました"):
 # 🏫 サイドバー & ログイン
 # ==========================================
 st.sidebar.title("🏫 クラスログイン")
+# 設定にあるクラスだけを選択肢にする（実行委員は削除済み）
 selected_class = st.sidebar.selectbox("クラス選択", list(CLASS_BUDGETS.keys()))
 
 # クラス切り替え時のリセット処理
@@ -86,7 +104,7 @@ if not st.session_state["is_logged_in"]:
             st.success("ログイン成功！"); time.sleep(0.5); st.rerun()
         else:
             st.error("パスワードが違います")
-    st.stop() # ログインしてなければここで停止
+    st.stop()
 
 # ==========================================
 # 🎉 メイン画面（ログイン後）
@@ -98,10 +116,9 @@ if st.sidebar.button("ログアウト"):
 menu = st.sidebar.radio("メニュー", ["💸 経費入力（買い出し）", "✅ ToDo掲示板", "💰 レジ（売上登録）", "🍔 商品メニュー登録"])
 st.sidebar.success(f"ログイン中: **{selected_class}**")
 
-# --- 📊 予算バー表示 ---
+# --- 📊 予算バー表示（クラスごとの設定を反映） ---
 budget = CLASS_BUDGETS.get(selected_class, 30000)
 records = load_data(selected_class)
-# データフレーム化して計算（経費のみ合計）
 df = pd.DataFrame(records)
 current_expense = 0
 if not df.empty and "金額" in df.columns:
@@ -142,24 +159,19 @@ elif menu == "✅ ToDo掲示板":
     st.divider()
     all_todos = load_data("TODO")
     if all_todos:
-        # 自分のクラスの未完了/完了を分類
         my_todos = [t for t in all_todos if t.get("クラス") == selected_class]
         active = [t for t in my_todos if "未完了" in t.get("状態", "")]
         done = [t for t in my_todos if "未完了" not in t.get("状態", "")]
 
         st.subheader("🔥 未完了タスク")
         if active:
-            # チェックボックス処理（スプレッドシートの行番号を特定するのは少し複雑なので、簡略化のため表示のみ or 別の方法推奨だが、今回は既存ロジック維持）
-            # ※軽量化のため、チェック機能は「更新ボタン」で一括処理する形を維持
             updates = []
-            sheet_todo = get_worksheet("TODO") # ここだけ直接取得が必要
-            all_values = sheet_todo.get_all_values() # 行番号特定のため生データ取得
+            sheet_todo = get_worksheet("TODO")
+            all_values = sheet_todo.get_all_values()
             
             for task in active:
-                # 生データから行番号を探す（簡易的なマッチング）
                 row_idx = -1
                 for idx, row in enumerate(all_values):
-                    # クラスと内容が一致する行を探す
                     if len(row) > 2 and row[0] == selected_class and row[2] == task["やるべきこと"] and "未完了" in row[4]:
                         row_idx = idx + 1
                         break
@@ -179,10 +191,9 @@ elif menu == "✅ ToDo掲示板":
 # 💰 レジ（売上登録）
 # ==========================================
 elif menu == "💰 レジ（売上登録）":
-    st.title(f"💰 {selected_class} POSレジ")
+    st.title(f"💰 {selected_class} レジ") # POS表記を削除
     c_menu, c_receipt = st.columns([1.5, 1])
 
-    # 左：メニュー
     with c_menu:
         st.subheader("🍔 商品選択")
         menu_list = [m for m in load_data("MENU") if m.get("クラス") == selected_class]
@@ -194,7 +205,6 @@ elif menu == "💰 レジ（売上登録）":
                 st.session_state["cart"].append(item)
                 st.rerun()
 
-    # 右：レシート
     with c_receipt:
         st.subheader("🧾 会計")
         total = sum([x['単価'] for x in st.session_state["cart"]])
@@ -208,13 +218,11 @@ elif menu == "💰 レジ（売上登録）":
 
         if total > 0:
             st.write("🔻 **預かり金入力**")
-            # 手入力欄
             val = st.number_input("¥", value=st.session_state["received_amount"], step=10, label_visibility="collapsed")
             if val != st.session_state["received_amount"]:
                 st.session_state["received_amount"] = val; st.rerun()
             
-            # クイックボタン（ループで生成してコード短縮！）
-            amounts = [1000, 500, 100, 50, 10, 0] # 0はクリア用
+            amounts = [1000, 500, 100, 50, 10, 0]
             b_cols = st.columns(3)
             for i, amt in enumerate(amounts):
                 label = "クリア" if amt == 0 else f"+{amt:,}"
@@ -255,7 +263,6 @@ elif menu == "🍔 商品メニュー登録":
             c1, c2 = st.columns([3, 1])
             c1.write(f"・**{item['商品名']}** : ¥{item['単価']}")
             if c2.button("削除", key=f"del_{i}"):
-                # 削除ロジック（ここだけ少し特殊なので手書き）
                 sheet = get_worksheet("MENU")
                 rows = sheet.get_all_values()
                 for idx, row in enumerate(rows):
