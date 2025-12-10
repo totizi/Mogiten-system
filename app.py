@@ -11,7 +11,6 @@ import time
 SPREADSHEET_NAME = "模擬店データベース"
 
 # 💰 クラスごとの予算（円）
-# ここを変えればクラスごとに予算を変えられます
 DEFAULT_BUDGET = 30000 
 
 # 🔐 クラスごとのパスワード設定
@@ -30,12 +29,16 @@ CLASS_PASSWORDS = {
 # ==========================================
 # ⚙️ アプリ初期設定
 # ==========================================
-st.set_page_config(page_title="文化祭統合システム", layout="wide")
+st.set_page_config(page_title="文化祭レジシステム", layout="wide")
 
+# セッション状態の初期化
 if "is_logged_in" not in st.session_state:
     st.session_state["is_logged_in"] = False
 if "logged_class" not in st.session_state:
     st.session_state["logged_class"] = None
+# ★重要：レジの「買い物かご」を作る
+if "cart" not in st.session_state:
+    st.session_state["cart"] = []
 
 # --- 共通接続関数 ---
 def connect_to_tab(tab_name):
@@ -68,6 +71,7 @@ selected_class = st.sidebar.selectbox("クラスを選んでください", class
 if st.session_state["logged_class"] != selected_class:
     st.session_state["is_logged_in"] = False
     st.session_state["logged_class"] = selected_class
+    st.session_state["cart"] = [] # カートも空にする
     st.rerun()
 
 st.sidebar.divider()
@@ -75,8 +79,6 @@ st.sidebar.divider()
 # --- ログイン画面 ---
 if not st.session_state["is_logged_in"]:
     st.title(f"🔒 {selected_class} ログイン")
-    st.write("パスワードを入力してください")
-    
     input_pass = st.text_input("パスワード", type="password")
     login_btn = st.button("ログイン")
     
@@ -100,44 +102,41 @@ if not st.session_state["is_logged_in"]:
 # --- ログアウトボタン ---
 if st.sidebar.button("ログアウト"):
     st.session_state["is_logged_in"] = False
+    st.session_state["cart"] = []
     st.rerun()
 
 # --- メニュー選択 ---
+# 分析を削除し、レジと経費を分けました
 menu = st.sidebar.radio(
     "メニュー",
-    ["💰 レジ・会計記録", "🍔 商品メニュー登録", "✅ ToDo掲示板", "📊 履歴・分析"],
+    ["💰 レジ（売上登録）", "💸 経費入力（買い出し）", "🍔 商品メニュー登録", "✅ ToDo掲示板"],
 )
 
 st.sidebar.success(f"ログイン中: **{selected_class}**")
 
 
 # ==========================================
-# ⚡️ 新機能：予算バーの表示（常に上に表示）
+# ⚡️ 予算バー（常に表示）
 # ==========================================
 sheet = connect_to_tab(selected_class)
 current_expense = 0
 if sheet:
     try:
-        # 全データを取得して「記録(経費)」の合計を出す
         all_data = sheet.get_all_records()
         df = pd.DataFrame(all_data)
         if not df.empty and "金額" in df.columns:
-            # 種別が「記録」または「経費」のものを合計
-            # (以前のデータ形式に対応するため、種別カラムがない場合も考慮)
+            # 経費だけを合計（売上は引かない）
             if "種別" in df.columns:
                 expense_df = df[df["種別"].isin(["経費", "記録"])]
                 current_expense = expense_df["金額"].sum()
             else:
-                # 種別がない古いデータなら全額を経費とみなす（仮）
                 current_expense = df["金額"].sum()
     except:
         pass
 
-# 予算計算
+# 予算表示
 remaining = DEFAULT_BUDGET - current_expense
 progress_val = min(current_expense / DEFAULT_BUDGET, 1.0)
-
-# バーを表示
 st.write(f"📊 **予算状況** (予算: {DEFAULT_BUDGET:,}円)")
 st.progress(progress_val)
 if remaining < 0:
@@ -149,19 +148,18 @@ st.divider()
 
 
 # ==========================================
-# 💰 メニュー1：レジ・会計記録
+# 💰 メニュー1：本格レジ（売上登録）
 # ==========================================
-if menu == "💰 レジ・会計記録":
-    st.title(f"💰 {selected_class} レジ・会計")
+if menu == "💰 レジ（売上登録）":
+    st.title(f"💰 {selected_class} POSレジ")
     
-    # タブで「レジモード」と「手入力」を分ける
-    tab1, tab2 = st.tabs(["⚡️ カンタン売上レジ", "📝 手動入力 (経費など)"])
+    # 画面を左右に分割（左：商品ボタン、右：レシート）
+    col_menu, col_receipt = st.columns([2, 1])
 
-    # --- ⚡️ レジモード ---
-    with tab1:
-        st.header("⚡️ 売上登録")
-        st.caption("ボタンを押すだけで売上が登録されます")
-
+    # --- 左側：商品ボタンエリア ---
+    with col_menu:
+        st.subheader("商品を選択")
+        
         # MENUシートから商品を読み込む
         menu_sheet = connect_to_tab("MENU")
         menu_items = []
@@ -170,65 +168,107 @@ if menu == "💰 レジ・会計記録":
                 menu_data = menu_sheet.get_all_records()
                 menu_df = pd.DataFrame(menu_data)
                 if not menu_df.empty and "クラス" in menu_df.columns:
-                    # 自分のクラスの商品だけ抽出
                     my_menu = menu_df[menu_df["クラス"] == selected_class]
                     menu_items = my_menu.to_dict("records")
             except:
-                st.warning("メニューの読み込みに失敗しました")
+                st.warning("メニュー読み込みエラー")
 
         if not menu_items:
-            st.info("まだ商品が登録されていません。サイドバーの「🍔 商品メニュー登録」から登録してください。")
+            st.info("サイドバーの「🍔 商品メニュー登録」から商品を登録してください")
         else:
-            # 商品ボタンを並べる
-            cols = st.columns(3) # 3列で表示
+            # ボタンをグリッド状に配置
+            # 3列で表示
+            cols = st.columns(3)
             for i, item in enumerate(menu_items):
                 name = item["商品名"]
                 price = item["単価"]
                 
-                # ボタンを表示（列を順番に使う）
+                # ボタン配置
                 with cols[i % 3]:
-                    # ボタンを押したら即登録
+                    # ボタンを押したら「カート」に追加
                     if st.button(f"{name}\n¥{price}", key=f"btn_{i}", use_container_width=True):
-                        sheet = connect_to_tab(selected_class)
-                        if sheet:
-                            d_str = datetime.now().strftime("%Y/%m/%d")
-                            # 日付, 種別, 担当者, 内容, 金額
-                            sheet.append_row([d_str, "売上", "レジ", name, price])
-                            st.success(f"✅ {name} (¥{price}) を売上登録しました！")
-                            time.sleep(1) # 少し待って
-                            st.rerun() # 予算バーなどを更新
+                        st.session_state["cart"].append({"name": name, "price": price})
+                        st.rerun() # 画面更新してレシートに反映
 
-    # --- 📝 手動入力モード ---
-    with tab2:
-        st.header("📝 経費・その他の入力")
-        st.caption("買い出しのレシート入力などはここから")
+    # --- 右側：レシートエリア ---
+    with col_receipt:
+        st.subheader("🧾 お会計リスト")
         
-        with st.form("manual_form"):
-            date = st.date_input("日付", datetime.now())
-            # 種別選択
-            type_option = st.selectbox("種別", ["経費", "売上"])
-            person = st.text_input("担当者")
-            item = st.text_input("内容")
-            amount = st.number_input("金額（円）", min_value=0, step=1)
+        # カートの中身を表示
+        total_price = 0
+        if len(st.session_state["cart"]) > 0:
+            for idx, cart_item in enumerate(st.session_state["cart"]):
+                st.text(f"・{cart_item['name']} : ¥{cart_item['price']}")
+                total_price += cart_item['price']
             
-            submitted = st.form_submit_button("記録する")
+            st.divider()
+            st.metric("合計金額", f"¥{total_price:,}")
+            
+            # お会計ボタン
+            checkout_btn = st.button("お会計（確定）", type="primary", use_container_width=True)
+            
+            # クリアボタン
+            if st.button("リセット（取り消し）", use_container_width=True):
+                st.session_state["cart"] = []
+                st.rerun()
 
-            if submitted:
+            # --- 会計処理 ---
+            if checkout_btn:
                 sheet = connect_to_tab(selected_class)
                 if sheet:
-                    d_str = date.strftime("%Y/%m/%d")
-                    sheet.append_row([d_str, type_option, person, item, amount])
-                    st.success(f"✅ 保存しました！")
+                    # まとめて書き込むデータを作る
+                    rows_to_add = []
+                    d_str = datetime.now().strftime("%Y/%m/%d")
+                    
+                    for cart_item in st.session_state["cart"]:
+                        # 日付, 種別, 担当者, 内容, 金額
+                        rows_to_add.append([d_str, "売上", "レジ", cart_item["name"], cart_item["price"]])
+                    
+                    # スプレッドシートに追加
+                    sheet.append_rows(rows_to_add)
+                    
+                    st.session_state["cart"] = [] # カートを空にする
+                    st.success("✅ お会計完了！ありがとうございました！")
+                    st.balloons()
+                    time.sleep(2)
                     st.rerun()
+        else:
+            st.info("左の商品を選んでください")
+            st.metric("合計金額", "¥0")
+
 
 # ==========================================
-# 🍔 メニュー2：商品メニュー登録
+# 💸 メニュー2：経費入力（買い出し）
+# ==========================================
+elif menu == "💸 経費入力（買い出し）":
+    st.title(f"💸 {selected_class} 経費入力")
+    st.caption("買い出しのレシートを見ながら入力してください")
+    
+    with st.form("expense_form"):
+        date = st.date_input("購入日", datetime.now())
+        person = st.text_input("担当者（誰が払った？）")
+        item = st.text_input("品名（なにを買った？）")
+        amount = st.number_input("金額（円）", min_value=0, step=1)
+        
+        submitted = st.form_submit_button("経費を登録")
+
+        if submitted:
+            sheet = connect_to_tab(selected_class)
+            if sheet:
+                d_str = date.strftime("%Y/%m/%d")
+                # 日付, 種別, 担当者, 内容, 金額
+                sheet.append_row([d_str, "経費", person, item, amount])
+                st.success(f"✅ {selected_class}のシートに保存しました！")
+                st.rerun() # 予算バー更新のため
+
+
+# ==========================================
+# 🍔 メニュー3：商品メニュー登録
 # ==========================================
 elif menu == "🍔 商品メニュー登録":
-    st.title(f"🍔 {selected_class} 商品メニュー設定")
-    st.caption("レジに表示するボタン（商品）を作ります")
+    st.title(f"🍔 {selected_class} 商品登録")
+    st.caption("ここで登録した商品がレジに表示されます")
 
-    # 新規登録フォーム
     with st.form("add_menu_form"):
         col1, col2 = st.columns(2)
         new_item = col1.text_input("商品名（例：焼きそば）")
@@ -238,7 +278,6 @@ elif menu == "🍔 商品メニュー登録":
         if add_btn and new_item:
             menu_sheet = connect_to_tab("MENU")
             if menu_sheet:
-                # クラス, 商品名, 単価
                 menu_sheet.append_row([selected_class, new_item, new_price])
                 st.success(f"✅ 「{new_item}」を追加しました")
                 time.sleep(1)
@@ -247,7 +286,6 @@ elif menu == "🍔 商品メニュー登録":
     st.divider()
     st.subheader("📋 現在のメニュー")
     
-    # 一覧表示
     menu_sheet = connect_to_tab("MENU")
     if menu_sheet:
         try:
@@ -255,16 +293,13 @@ elif menu == "🍔 商品メニュー登録":
             df = pd.DataFrame(data)
             if not df.empty and "クラス" in df.columns:
                 my_menu = df[df["クラス"] == selected_class]
-                if not my_menu.empty:
-                    st.table(my_menu[["商品名", "単価"]])
-                    st.caption("※削除したい場合は、スプレッドシートの「MENU」タブから直接行を消してください。")
-                else:
-                    st.info("登録済みメニューはありません")
+                st.table(my_menu[["商品名", "単価"]])
         except:
-            st.error("MENUシートの読み込みエラー（1行目の見出しを確認してください）")
+            st.error("MENUシート読込エラー")
+
 
 # ==========================================
-# ✅ メニュー3：ToDo掲示板
+# ✅ メニュー4：ToDo掲示板
 # ==========================================
 elif menu == "✅ ToDo掲示板":
     st.title(f"✅ {selected_class} ToDo掲示板")
@@ -300,41 +335,3 @@ elif menu == "✅ ToDo掲示板":
                     st.info("書き込みはありません")
         except:
             pass
-
-# ==========================================
-# 📊 メニュー4：履歴・分析
-# ==========================================
-elif menu == "📊 履歴・分析":
-    st.title(f"📊 {selected_class} 経営レポート")
-    
-    if st.button("最新データを計算"):
-        sheet = connect_to_tab(selected_class)
-        if sheet:
-            try:
-                data = sheet.get_all_records()
-                df = pd.DataFrame(data)
-
-                if not df.empty and "種別" in df.columns:
-                    # 経費の合計
-                    exp_df = df[df["種別"].isin(["経費", "記録"])]
-                    total_exp = exp_df["金額"].sum()
-
-                    # 売上の合計
-                    sales_df = df[df["種別"] == "売上"]
-                    total_sales = sales_df["金額"].sum()
-
-                    # 利益
-                    profit = total_sales - total_exp
-
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("総売上", f"{total_sales:,} 円")
-                    col2.metric("総経費", f"{total_exp:,} 円")
-                    col3.metric("利益", f"{profit:,} 円", delta=profit)
-                    
-                    st.divider()
-                    st.write("📋 全データ履歴")
-                    st.dataframe(df)
-                else:
-                    st.warning("データがありません")
-            except Exception as e:
-                st.error(f"エラー: {e}")
