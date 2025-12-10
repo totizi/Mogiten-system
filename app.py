@@ -17,6 +17,26 @@ CLASS_PASSWORDS = {
 
 st.set_page_config(page_title="文化祭レジ", layout="wide")
 
+st.markdown("""
+    <style>
+    /* ボタンのスタイル調整 */
+    div.stButton > button {
+        /* 文字が長くても途中で切らず、単語の区切り（日本語は句読点や種別）で改行 */
+        word-break: keep-all !important; 
+        overflow-wrap: break-word !important;
+        
+        /* ボタンの高さを文字数に合わせて自動調整 */
+        height: auto !important;
+        min-height: 50px !important;
+        padding-top: 10px !important;
+        padding-bottom: 10px !important;
+        
+        /* 文字サイズを少し小さくして収まりやすくする（お好みで） */
+        /* font-size: 14px !important; */
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 # セッション初期化（存在しない場合のみ作成）
 if "is_logged_in" not in st.session_state:
     st.session_state.update({
