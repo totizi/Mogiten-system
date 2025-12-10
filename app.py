@@ -42,6 +42,8 @@ with st.form("input_form"):
             st.success("✅ スプレッドシートに保存しました！")
             st.balloons()
             
+            st.warning("👇 本当にここに書き込まれているか、クリックして確認してください！")
+            st.write(f"書き込み先URL: {sheet.url}")
             # --- デバッグ用（どこに書き込んだか表示） ---
             st.info(f"書き込み先: {SPREADSHEET_NAME}")
             
