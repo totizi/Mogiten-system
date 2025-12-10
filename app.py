@@ -1,4 +1,3 @@
-app.py
 import streamlit as st
 
 st.title("文化祭会計 Mogi-Pay 🚀")
