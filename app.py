@@ -247,4 +247,129 @@ elif menu == "📊 分析・在庫":
         if len(c_rows) > 1:
             df = pd.DataFrame(c_rows[1:], columns=c_rows[0])
             if "種別" in df.columns and "内容" in df.columns:
-                sales_df = df[df["種別"].astype(str).str
+                sales_df = df[df["種別"].astype(str).str.contains("売上")]
+                item_counts = {}
+                for items in sales_df["内容"]:
+                    for item in items.split(","):
+                        i_name = item.strip()
+                        item_counts[i_name] = item_counts.get(i_name, 0) + 1
+                
+                if item_counts:
+                    chart_data = pd.DataFrame(list(item_counts.items()), columns=["商品", "個数"]).set_index("商品")
+                    st.bar_chart(chart_data)
+                else: st.info("まだ売上がありません")
+        else: st.info("データがありません")
+
+# ==========================================
+# 💸 経費
+# ==========================================
+elif menu == "💸 経費":
+    st.subheader(f"💸 {selected_class} 経費")
+    with st.form("exp"):
+        c1, c2 = st.columns(2)
+        d = c1.date_input("日付")
+        p = c2.text_input("担当")
+        i = st.text_input("品名")
+        a = st.number_input("金額", min_value=0, step=1)
+        if st.form_submit_button("登録", use_container_width=True):
+            if not i or a <= 0: st.error("入力を確認してください")
+            else: append_data(selected_class, [d.strftime("%Y/%m/%d"), "🔴 経費", p, i, a])
+
+# ==========================================
+# ✅ ToDo
+# ==========================================
+elif menu == "✅ ToDo":
+    st.subheader(f"✅ {selected_class} ToDo")
+    with st.expander("➕ タスク追加", expanded=True):
+        with st.form("todo"):
+            t = st.text_input("内容")
+            p = st.text_input("担当")
+            if st.form_submit_button("書き込む", use_container_width=True):
+                if t: append_data("TODO", [selected_class, datetime.now().strftime("%Y/%m/%d"), t, p, "未完了"])
+    st.divider()
+    @st.fragment
+    def render_todo():
+        rows = get_raw_data("TODO")
+        if len(rows) > 1:
+            active = [r + [idx+1] for idx, r in enumerate(rows) if idx > 0 and r[0] == selected_class and "未完了" in r[4]]
+            if active:
+                st.caption("チェックして完了")
+                updates = []
+                for task in active:
+                    if st.checkbox(f"{task[2]} ({task[3]})", key=f"chk_todo_{task[-1]}"): updates.append(task[-1])
+                if updates and st.button("完了にする", type="primary", use_container_width=True):
+                    def _update():
+                        sh = get_spreadsheet(); ws = sh.worksheet("TODO")
+                        for ridx in updates: ws.update_cell(ridx, 5, "完了")
+                    if safe_api_call(_update) is not None:
+                        get_raw_data.clear(); st.toast("更新完了"); time.sleep(0.1); st.rerun()
+            else: st.info("タスクなし")
+    render_todo()
+
+# ==========================================
+# 🍔 メニュー登録
+# ==========================================
+elif menu == "🍔 登録":
+    st.subheader("🍔 メニュー登録")
+    
+    with st.form("add_m"):
+        c1, c2 = st.columns(2)
+        n = c1.text_input("商品名")
+        p = c2.number_input("単価", min_value=0, step=10)
+        if st.form_submit_button("追加", use_container_width=True):
+            if n and p > 0: append_data("MENU", [selected_class, n, p, "販売中"], "追加しました")
+            else: st.error("確認してください")
+
+    st.divider()
+    
+    st.write("📋 登録済みメニュー")
+    menu_rows = get_raw_data("MENU")
+    
+    my_menu_items = []
+    for idx, row in enumerate(menu_rows):
+        if idx > 0 and row[0] == selected_class:
+            my_menu_items.append({"data": row, "idx": idx + 1})
+
+    if my_menu_items:
+        for item in my_menu_items:
+            row = item["data"]
+            row_idx = item["idx"]
+            
+            c1, c2 = st.columns([3, 1])
+            c1.write(f"・**{row[1]}** : ¥{row[2]}")
+            
+            # 削除ボタン
+            if c2.button("削除", key=f"del_menu_{row_idx}"): # 行番号をキーにする
+                def _del():
+                    sh = get_spreadsheet(); ws = sh.worksheet("MENU")
+                    ws.delete_rows(row_idx)
+                
+                with st.spinner("削除中..."):
+                    if safe_api_call(_del) is not None:
+                        get_raw_data.clear()
+                        st.toast("削除しました")
+                        time.sleep(0.1)
+                        st.rerun()
+    else:
+        st.info("登録されている商品はありません")
+
+# ==========================================
+# ⚙️ 予算設定
+# ==========================================
+elif menu == "⚙️ 予算":
+    st.subheader("⚙️ 予算")
+    with st.form("bud"):
+        curr = 30000
+        try:
+            for r in get_raw_data("BUDGET"):
+                if r[0] == selected_class: curr = int(r[1]); break
+        except: pass
+        new_b = st.number_input("新予算", value=curr, step=1000)
+        if st.form_submit_button("更新", use_container_width=True):
+            def _upd():
+                sh = get_spreadsheet(); ws = sh.worksheet("BUDGET")
+                cell = ws.find(selected_class)
+                if cell: ws.update_cell(cell.row, 2, new_b)
+                else: ws.append_row([selected_class, new_b])
+            if safe_api_call(_upd) is not None:
+                get_raw_data.clear(); st.toast("予算更新"); time.sleep(0.1); st.rerun()
