@@ -22,6 +22,7 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
+    
     div.stButton > button {
         word-break: keep-all !important; 
         overflow-wrap: break-word !important;
@@ -35,7 +36,7 @@ st.markdown("""
     .stSpinner > div { border-top-color: #ff4b4b !important; }
     .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
     
-    /* 売り切れボタン用のスタイル */
+    /* 売り切れボタン用 */
     .sold-out {
         background-color: #d3d3d3 !important;
         color: #808080 !important;
@@ -85,21 +86,20 @@ def append_data(tab_name, row, msg="保存完了"):
     def _append():
         sh = get_spreadsheet(); ws = sh.worksheet(tab_name)
         ws.append_row(row)
+    
     with st.spinner("処理中..."):
         if safe_api_call(_append) is not None:
-            get_raw_data.clear(); st.toast(f"✅ {msg}", icon="🎉"); time.sleep(0.3); st.rerun()
+            get_raw_data.clear(); st.toast(f"✅ {msg}", icon="🎉"); time.sleep(0.1); st.rerun()
 
-# 売り切れ状態を更新する関数
 def update_stock_status(item_name, status):
     def _update():
         sh = get_spreadsheet(); ws = sh.worksheet("MENU")
         cell = ws.find(item_name)
-        # 4列目(D列)を状態管理に使う
         if cell: ws.update_cell(cell.row, 4, status)
     
     with st.spinner("更新中..."):
         if safe_api_call(_update) is not None:
-            get_raw_data.clear(); st.toast(f"{status}にしました"); time.sleep(0.5); st.rerun()
+            get_raw_data.clear(); st.toast(f"{status}にしました"); time.sleep(0.1); st.rerun()
 
 # ==========================================
 # 🏫 ログイン
@@ -130,7 +130,6 @@ if st.sidebar.button("ログアウト", use_container_width=True):
     st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0})
     st.rerun()
 
-# メニューに「📊 分析・在庫」を追加
 menu = st.sidebar.radio("メニュー", ["💰 レジ", "📊 分析・在庫", "💸 経費", "✅ ToDo", "🍔 登録", "⚙️ 予算"])
 st.sidebar.success(f"Login: **{selected_class}**")
 
@@ -155,7 +154,7 @@ except: pass
 st.divider()
 
 # ==========================================
-# 💰 レジ (売り切れ機能付き)
+# 💰 レジ
 # ==========================================
 if menu == "💰 レジ":
     st.subheader(f"💰 {selected_class} レジ")
@@ -164,7 +163,6 @@ if menu == "💰 レジ":
     def render_pos():
         c_menu, c_receipt = st.columns([1.5, 1])
         menu_rows = get_raw_data("MENU")
-        # メニューデータ: [Class, Name, Price, Status]
         my_menu = [r for r in menu_rows[1:] if r[0] == selected_class]
 
         with c_menu:
@@ -172,12 +170,11 @@ if menu == "💰 レジ":
             cols = st.columns(2)
             for i, item in enumerate(my_menu):
                 n, p = item[1], int(item[2])
-                # 4列目(index 3)が "完売" ならボタンを押せなくする
                 is_sold_out = (len(item) > 3 and item[3] == "完売")
-                
                 label = f"🚫 {n} (完売)" if is_sold_out else f"{n}\n¥{p}"
                 
-                if cols[i % 2].button(label, key=f"btn_{i}", use_container_width=True, disabled=is_sold_out):
+                # キーを一意にする
+                if cols[i % 2].button(label, key=f"pos_btn_{n}", use_container_width=True, disabled=is_sold_out):
                     st.session_state["cart"].append({"n": n, "p": p})
                     st.rerun() 
 
@@ -220,15 +217,14 @@ if menu == "💰 レジ":
     render_pos()
 
 # ==========================================
-# 📊 分析・在庫管理 (新機能)
+# 📊 分析・在庫
 # ==========================================
 elif menu == "📊 分析・在庫":
-    st.subheader("📊 売上分析 & 在庫管理")
+    st.subheader("📊 売上分析 & 在庫")
     
-    tab1, tab2 = st.tabs(["📦 在庫スイッチ", "📈 売上グラフ"])
+    tab1, tab2 = st.tabs(["📦 在庫", "📈 売上"])
     
     with tab1:
-        st.caption("商品がなくなったら「販売中」を押して「完売」にしてください")
         menu_rows = get_raw_data("MENU")
         my_menu = [r for r in menu_rows[1:] if r[0] == selected_class]
         
@@ -243,19 +239,14 @@ elif menu == "📊 分析・在庫":
                 if c2.button(btn_label, key=f"stock_{n}"):
                     new_status = "完売" if status != "完売" else "販売中"
                     update_stock_status(n, new_status)
-        else:
-            st.info("メニューがありません")
+        else: st.info("メニューがありません")
 
     with tab2:
-        # 売上データの集計とグラフ化
         c_rows = get_raw_data(selected_class)
         if len(c_rows) > 1:
             df = pd.DataFrame(c_rows[1:], columns=c_rows[0])
-            # 売上データのみ抽出
             if "種別" in df.columns and "内容" in df.columns:
                 sales_df = df[df["種別"].astype(str).str.contains("売上")]
-                
-                # 商品ごとのカウント（カンマ区切りの商品を分解）
                 item_counts = {}
                 for items in sales_df["内容"]:
                     for item in items.split(","):
@@ -265,14 +256,11 @@ elif menu == "📊 分析・在庫":
                 if item_counts:
                     chart_data = pd.DataFrame(list(item_counts.items()), columns=["商品", "個数"]).set_index("商品")
                     st.bar_chart(chart_data)
-                    st.caption("※セット販売なども1個としてカウントされます")
-                else:
-                    st.info("まだ売上がありません")
-        else:
-            st.info("データがありません")
+                else: st.info("まだ売上がありません")
+        else: st.info("データがありません")
 
 # ==========================================
-# 💸 経費入力
+# 💸 経費
 # ==========================================
 elif menu == "💸 経費":
     st.subheader(f"💸 {selected_class} 経費")
@@ -307,40 +295,67 @@ elif menu == "✅ ToDo":
                 st.caption("チェックして完了")
                 updates = []
                 for task in active:
-                    if st.checkbox(f"{task[2]} ({task[3]})", key=f"chk_{task[-1]}"): updates.append(task[-1])
+                    # キーを一意にする
+                    if st.checkbox(f"{task[2]} ({task[3]})", key=f"chk_todo_{task[-1]}"): updates.append(task[-1])
                 if updates and st.button("完了にする", type="primary", use_container_width=True):
                     def _update():
                         sh = get_spreadsheet(); ws = sh.worksheet("TODO")
                         for ridx in updates: ws.update_cell(ridx, 5, "完了")
                     if safe_api_call(_update) is not None:
-                        get_raw_data.clear(); st.toast("更新完了"); time.sleep(0.5); st.rerun()
+                        get_raw_data.clear(); st.toast("更新完了"); time.sleep(0.1); st.rerun()
             else: st.info("タスクなし")
     render_todo()
 
 # ==========================================
-# 🍔 メニュー登録
+# 🍔 メニュー登録（ここを大幅改善）
 # ==========================================
 elif menu == "🍔 登録":
     st.subheader("🍔 メニュー登録")
+    
+    # 登録フォーム
     with st.form("add_m"):
         c1, c2 = st.columns(2)
         n = c1.text_input("商品名")
         p = c2.number_input("単価", min_value=0, step=10)
+        # fragmentを使わず、formで一発送信してrerunする
         if st.form_submit_button("追加", use_container_width=True):
-            if n and p > 0: append_data("MENU", [selected_class, n, p, "販売中"])
+            if n and p > 0: append_data("MENU", [selected_class, n, p, "販売中"], "追加しました")
             else: st.error("確認してください")
+
     st.divider()
-    m_rows = get_raw_data("MENU")
-    for idx, row in enumerate(m_rows):
+    
+    # 削除ボタン付きリスト（直接レンダリング）
+    st.write("📋 登録済みメニュー")
+    menu_rows = get_raw_data("MENU")
+    
+    # 自分のクラスのデータだけ抽出（インデックスも保持）
+    my_menu_items = []
+    for idx, row in enumerate(menu_rows):
         if idx > 0 and row[0] == selected_class:
+            my_menu_items.append({"data": row, "idx": idx + 1}) # 行番号は+1
+
+    if my_menu_items:
+        for item in my_menu_items:
+            row = item["data"]
+            row_idx = item["idx"]
+            
             c1, c2 = st.columns([3, 1])
-            c1.write(f"・{row[1]} : ¥{row[2]}")
-            if c2.button("削除", key=f"del_{idx}"):
+            c1.write(f"・**{row[1]}** : ¥{row[2]}")
+            
+            # ★改善: 商品名をキーに含めて、削除時のボタンのズレを防ぐ
+            if c2.button("削除", key=f"del_menu_{row[1]}_{row_idx}"):
                 def _del():
                     sh = get_spreadsheet(); ws = sh.worksheet("MENU")
-                    ws.delete_rows(idx + 1)
-                if safe_api_call(_del) is not None:
-                    get_raw_data.clear(); st.toast("削除しました"); time.sleep(0.5); st.rerun()
+                    ws.delete_rows(row_idx)
+                
+                with st.spinner("削除中..."):
+                    if safe_api_call(_del) is not None:
+                        get_raw_data.clear()
+                        st.toast("削除しました")
+                        time.sleep(0.1) # 待機時間を短縮
+                        st.rerun()
+    else:
+        st.info("登録されている商品はありません")
 
 # ==========================================
 # ⚙️ 予算設定
@@ -361,4 +376,4 @@ elif menu == "⚙️ 予算":
                 if cell: ws.update_cell(cell.row, 2, new_b)
                 else: ws.append_row([selected_class, new_b])
             if safe_api_call(_upd) is not None:
-                get_raw_data.clear(); st.toast("予算更新"); time.sleep(0.5); st.rerun()
+                get_raw_data.clear(); st.toast("予算更新"); time.sleep(0.1); st.rerun()
