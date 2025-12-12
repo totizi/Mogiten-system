@@ -45,10 +45,15 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# セッション初期化
 if "is_logged_in" not in st.session_state:
     st.session_state.update({
-        "is_logged_in": False, "logged_class": None, 
-        "cart": [], "received_amount": 0
+        "is_logged_in": False, 
+        "logged_class": None, 
+        "cart": [], 
+        "received_amount": 0,
+        "flash_msg": None, # ★追加：画面上部にメッセージを出すための変数
+        "flash_type": "success"
     })
 
 # ==========================================
@@ -82,14 +87,22 @@ def get_raw_data(tab_name):
     try: return sh.worksheet(tab_name).get_all_values()
     except: return []
 
+# ★改良：メッセージをセッションに保存してリロード後に表示する関数
+def set_flash_message(msg, type="success"):
+    st.session_state["flash_msg"] = msg
+    st.session_state["flash_type"] = type
+
 def append_data(tab_name, row, msg="保存完了"):
     def _append():
         sh = get_spreadsheet(); ws = sh.worksheet(tab_name)
         ws.append_row(row)
     
-    with st.spinner("処理中..."):
+    with st.spinner("送信中..."):
         if safe_api_call(_append) is not None:
-            get_raw_data.clear(); st.toast(f"✅ {msg}", icon="🎉"); time.sleep(0.1); st.rerun()
+            get_raw_data.clear()
+            set_flash_message(f"✅ {msg}", "success") # メッセージセット
+            time.sleep(0.5) # 少し待ってから
+            st.rerun() # リロード
 
 def update_stock_status(item_name, status):
     def _update():
@@ -99,7 +112,10 @@ def update_stock_status(item_name, status):
     
     with st.spinner("更新中..."):
         if safe_api_call(_update) is not None:
-            get_raw_data.clear(); st.toast(f"{status}にしました"); time.sleep(0.1); st.rerun()
+            get_raw_data.clear()
+            set_flash_message(f"✅ {status}にしました", "success")
+            time.sleep(0.5)
+            st.rerun()
 
 # ==========================================
 # 🏫 ログイン
@@ -108,7 +124,10 @@ st.sidebar.title("🏫 クラス")
 selected_class = st.sidebar.selectbox("選択", list(CLASS_PASSWORDS.keys()), label_visibility="collapsed")
 
 if st.session_state["logged_class"] != selected_class:
-    st.session_state.update({"is_logged_in": False, "logged_class": selected_class, "cart": [], "received_amount": 0})
+    st.session_state.update({
+        "is_logged_in": False, "logged_class": selected_class, 
+        "cart": [], "received_amount": 0, "flash_msg": None
+    })
     st.rerun()
 
 st.sidebar.divider()
@@ -126,6 +145,15 @@ if not st.session_state["is_logged_in"]:
 # ==========================================
 # 🎉 メイン画面
 # ==========================================
+# ★ここにメッセージ表示エリアを設置（一番目立つ場所）
+if st.session_state["flash_msg"]:
+    if st.session_state["flash_type"] == "success":
+        st.success(st.session_state["flash_msg"])
+    else:
+        st.error(st.session_state["flash_msg"])
+    # 一度表示したら消す
+    st.session_state["flash_msg"] = None
+
 if st.sidebar.button("ログアウト", use_container_width=True):
     st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0})
     st.rerun()
@@ -173,7 +201,7 @@ if menu == "💰 レジ":
                 is_sold_out = (len(item) > 3 and item[3] == "完売")
                 label = f"🚫 {n} (完売)" if is_sold_out else f"{n}\n¥{p}"
                 
-                # ★修正点: キーを商品名(n)ではなく、通し番号(i)に変更して重複エラーを回避
+                # キーを通し番号(i)にして重複回避
                 if cols[i % 2].button(label, key=f"pos_btn_{i}", use_container_width=True, disabled=is_sold_out):
                     st.session_state["cart"].append({"n": n, "p": p})
                     st.rerun() 
@@ -208,8 +236,9 @@ if menu == "💰 レジ":
                         st.toast("⚠️ 金額不足", icon="🚫")
                     else:
                         items_str = ",".join([x['n'] for x in st.session_state["cart"]])
-                        append_data(selected_class, [datetime.now().strftime("%Y/%m/%d"), "🔵 売上", "レジ", items_str, total], "売上完了")
-                        st.session_state["cart"] = []; st.session_state["received_amount"] = 0
+                        append_data(selected_class, [datetime.now().strftime("%Y/%m/%d"), "🔵 売上", "レジ", items_str, total], "売上完了！")
+                        st.session_state["cart"] = []
+                        st.session_state["received_amount"] = 0
             
             if st.button("クリア", use_container_width=True):
                 st.session_state["cart"] = []; st.session_state["received_amount"] = 0; st.rerun()
@@ -229,14 +258,14 @@ elif menu == "📊 分析・在庫":
         my_menu = [r for r in menu_rows[1:] if r[0] == selected_class]
         
         if my_menu:
-            for i, item in enumerate(my_menu): # enumerateを使用
+            for i, item in enumerate(my_menu):
                 n = item[1]
                 status = item[3] if len(item) > 3 else "販売中"
                 c1, c2 = st.columns([3, 1])
                 c1.write(f"**{n}**")
                 
                 btn_label = "🔴 完売にする" if status != "完売" else "🟢 販売再開"
-                # キーに通し番号(i)を使って重複回避
+                # キーを通し番号(i)にして重複回避
                 if c2.button(btn_label, key=f"stock_{i}_{n}"):
                     new_status = "完売" if status != "完売" else "販売中"
                     update_stock_status(n, new_status)
@@ -273,7 +302,7 @@ elif menu == "💸 経費":
         a = st.number_input("金額", min_value=0, step=1)
         if st.form_submit_button("登録", use_container_width=True):
             if not i or a <= 0: st.error("入力を確認してください")
-            else: append_data(selected_class, [d.strftime("%Y/%m/%d"), "🔴 経費", p, i, a])
+            else: append_data(selected_class, [d.strftime("%Y/%m/%d"), "🔴 経費", p, i, a], "経費を登録しました")
 
 # ==========================================
 # ✅ ToDo
@@ -285,7 +314,7 @@ elif menu == "✅ ToDo":
             t = st.text_input("内容")
             p = st.text_input("担当")
             if st.form_submit_button("書き込む", use_container_width=True):
-                if t: append_data("TODO", [selected_class, datetime.now().strftime("%Y/%m/%d"), t, p, "未完了"])
+                if t: append_data("TODO", [selected_class, datetime.now().strftime("%Y/%m/%d"), t, p, "未完了"], "タスクを追加しました")
     st.divider()
     @st.fragment
     def render_todo():
@@ -302,7 +331,10 @@ elif menu == "✅ ToDo":
                         sh = get_spreadsheet(); ws = sh.worksheet("TODO")
                         for ridx in updates: ws.update_cell(ridx, 5, "完了")
                     if safe_api_call(_update) is not None:
-                        get_raw_data.clear(); st.toast("更新完了"); time.sleep(0.1); st.rerun()
+                        get_raw_data.clear()
+                        set_flash_message("✅ タスクを完了しました")
+                        time.sleep(0.5)
+                        st.rerun()
             else: st.info("タスクなし")
     render_todo()
 
@@ -317,7 +349,7 @@ elif menu == "🍔 登録":
         n = c1.text_input("商品名")
         p = c2.number_input("単価", min_value=0, step=10)
         if st.form_submit_button("追加", use_container_width=True):
-            if n and p > 0: append_data("MENU", [selected_class, n, p, "販売中"], "追加しました")
+            if n and p > 0: append_data("MENU", [selected_class, n, p, "販売中"], f"「{n}」を追加しました")
             else: st.error("確認してください")
 
     st.divider()
@@ -326,9 +358,10 @@ elif menu == "🍔 登録":
     menu_rows = get_raw_data("MENU")
     
     my_menu_items = []
+    # 行番号を保持するためにenumerateを使う
     for idx, row in enumerate(menu_rows):
         if idx > 0 and row[0] == selected_class:
-            my_menu_items.append({"data": row, "idx": idx + 1})
+            my_menu_items.append({"data": row, "idx": idx + 1}) # 行番号(1始まり)
 
     if my_menu_items:
         for item in my_menu_items:
@@ -339,7 +372,8 @@ elif menu == "🍔 登録":
             c1.write(f"・**{row[1]}** : ¥{row[2]}")
             
             # 削除ボタン
-            if c2.button("削除", key=f"del_menu_{row_idx}"): # 行番号をキーにする
+            # キーを一意にするために行番号(row_idx)を含める
+            if c2.button("削除", key=f"del_menu_{row_idx}"):
                 def _del():
                     sh = get_spreadsheet(); ws = sh.worksheet("MENU")
                     ws.delete_rows(row_idx)
@@ -347,8 +381,8 @@ elif menu == "🍔 登録":
                 with st.spinner("削除中..."):
                     if safe_api_call(_del) is not None:
                         get_raw_data.clear()
-                        st.toast("削除しました")
-                        time.sleep(0.1)
+                        set_flash_message(f"✅ 「{row[1]}」を削除しました")
+                        time.sleep(0.5)
                         st.rerun()
     else:
         st.info("登録されている商品はありません")
@@ -372,4 +406,7 @@ elif menu == "⚙️ 予算":
                 if cell: ws.update_cell(cell.row, 2, new_b)
                 else: ws.append_row([selected_class, new_b])
             if safe_api_call(_upd) is not None:
-                get_raw_data.clear(); st.toast("予算更新"); time.sleep(0.1); st.rerun()
+                get_raw_data.clear()
+                set_flash_message("✅ 予算を更新しました")
+                time.sleep(0.5)
+                st.rerun()
