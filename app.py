@@ -3,35 +3,47 @@ from datetime import datetime
 import json
 import gspread
 import time
+import pandas as pd
 
 # ==========================================
 # ⚙️ 設定エリア
 # ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
 
-# 🔐 クラスごとのパスワード
+# クラス設定
 CLASS_PASSWORDS = {
-    "21HR": "2121", "22HR": "2222", "23HR": "2323", "24HR": "2424",
-    "25HR": "2525", "26HR": "2626", "27HR": "2727", "28HR": "2828"
+    f"{i}HR": str(i)*2 for i in range(21, 29)
 }
 
-# ページ設定 & スマホ用CSS（改行対策）
-st.set_page_config(page_title="文化祭レジ", layout="wide")
+# ページ設定 & CSS
+st.set_page_config(page_title="文化祭レジ", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
     <style>
-    /* スマホでボタンの文字が変な位置で改行されないようにする設定 */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
     div.stButton > button {
         word-break: keep-all !important; 
         overflow-wrap: break-word !important;
         height: auto !important;
-        min-height: 50px !important;
-        padding-top: 10px !important;
-        padding-bottom: 10px !important;
+        min-height: 60px !important;
+        padding: 5px 10px !important;
+        font-weight: bold !important;
+        font-size: 16px !important;
+        border-radius: 12px !important;
+    }
+    .stSpinner > div { border-top-color: #ff4b4b !important; }
+    .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
+    
+    /* 売り切れボタン用のスタイル */
+    .sold-out {
+        background-color: #d3d3d3 !important;
+        color: #808080 !important;
+        cursor: not-allowed !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# セッション初期化
 if "is_logged_in" not in st.session_state:
     st.session_state.update({
         "is_logged_in": False, "logged_class": None, 
@@ -39,53 +51,61 @@ if "is_logged_in" not in st.session_state:
     })
 
 # ==========================================
-# 🛠️ バックエンド処理
+# 🛡️ バックエンド
 # ==========================================
-def get_gc():
+@st.cache_resource(ttl=3600)
+def get_spreadsheet():
     if "service_account_json" not in st.secrets:
         st.error("Secrets設定なし"); return None
     try:
-        return gspread.service_account_from_dict(json.loads(st.secrets["service_account_json"]))
-    except: return None
+        creds = json.loads(st.secrets["service_account_json"])
+        gc = gspread.service_account_from_dict(creds)
+        return gc.open(SPREADSHEET_NAME)
+    except Exception as e:
+        st.error(f"DB接続エラー: {e}"); return None
+
+def safe_api_call(func, *args):
+    max_retries = 3
+    for i in range(max_retries):
+        try:
+            return func(*args)
+        except Exception as e:
+            if i == max_retries - 1: st.error(f"通信失敗: {e}"); return None
+            time.sleep(1.5 ** i)
+    return None
 
 @st.cache_data(ttl=600)
 def get_raw_data(tab_name):
-    gc = get_gc()
-    if not gc: return []
-    try:
-        sh = gc.open(SPREADSHEET_NAME)
-        return sh.worksheet(tab_name).get_all_values()
+    sh = get_spreadsheet()
+    if not sh: return []
+    try: return sh.worksheet(tab_name).get_all_values()
     except: return []
 
 def append_data(tab_name, row, msg="保存完了"):
-    gc = get_gc()
-    if gc:
-        try:
-            sh = gc.open(SPREADSHEET_NAME).worksheet(tab_name)
-            sh.append_row(row)
-            get_raw_data.clear() # キャッシュクリア
-            st.success(f"✅ {msg}")
-            time.sleep(0.3)
-            st.rerun()
-        except: st.error("保存エラー")
+    def _append():
+        sh = get_spreadsheet(); ws = sh.worksheet(tab_name)
+        ws.append_row(row)
+    with st.spinner("処理中..."):
+        if safe_api_call(_append) is not None:
+            get_raw_data.clear(); st.toast(f"✅ {msg}", icon="🎉"); time.sleep(0.3); st.rerun()
 
-def update_budget(class_name, amount):
-    gc = get_gc()
-    if gc:
-        try:
-            sh = gc.open(SPREADSHEET_NAME).worksheet("BUDGET")
-            cell = sh.find(class_name)
-            if cell: sh.update_cell(cell.row, 2, amount)
-            else: sh.append_row([class_name, amount])
-            get_raw_data.clear()
-            st.success("予算更新！"); time.sleep(0.3); st.rerun()
-        except: st.error("更新エラー")
+# 売り切れ状態を更新する関数
+def update_stock_status(item_name, status):
+    def _update():
+        sh = get_spreadsheet(); ws = sh.worksheet("MENU")
+        cell = ws.find(item_name)
+        # 4列目(D列)を状態管理に使う
+        if cell: ws.update_cell(cell.row, 4, status)
+    
+    with st.spinner("更新中..."):
+        if safe_api_call(_update) is not None:
+            get_raw_data.clear(); st.toast(f"{status}にしました"); time.sleep(0.5); st.rerun()
 
 # ==========================================
-# 🏫 サイドバー & ログイン
+# 🏫 ログイン
 # ==========================================
-st.sidebar.title("🏫 クラス選択")
-selected_class = st.sidebar.selectbox("クラス", list(CLASS_PASSWORDS.keys()))
+st.sidebar.title("🏫 クラス")
+selected_class = st.sidebar.selectbox("選択", list(CLASS_PASSWORDS.keys()), label_visibility="collapsed")
 
 if st.session_state["logged_class"] != selected_class:
     st.session_state.update({"is_logged_in": False, "logged_class": selected_class, "cart": [], "received_amount": 0})
@@ -94,49 +114,167 @@ if st.session_state["logged_class"] != selected_class:
 st.sidebar.divider()
 
 if not st.session_state["is_logged_in"]:
-    st.title(f"🔒 {selected_class} ログイン")
-    pw = st.text_input("パスワード", type="password")
-    if st.button("ログイン"):
-        if pw.strip() == CLASS_PASSWORDS.get(selected_class):
-            st.session_state["is_logged_in"] = True
-            st.rerun()
-        else: st.error("パスワードが違います")
+    st.title(f"🔒 {selected_class}")
+    with st.form("login"):
+        pw = st.text_input("パスワード", type="password")
+        if st.form_submit_button("ログイン", type="primary", use_container_width=True):
+            if pw.strip() == CLASS_PASSWORDS.get(selected_class):
+                st.session_state["is_logged_in"] = True; st.rerun()
+            else: st.error("パスワードが違います")
     st.stop()
 
 # ==========================================
 # 🎉 メイン画面
 # ==========================================
-if st.sidebar.button("ログアウト"):
+if st.sidebar.button("ログアウト", use_container_width=True):
     st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0})
     st.rerun()
 
-menu = st.sidebar.radio("メニュー", ["💸 経費入力", "✅ ToDo", "💰 レジ", "🍔 メニュー", "⚙️ 予算"])
+# メニューに「📊 分析・在庫」を追加
+menu = st.sidebar.radio("メニュー", ["💰 レジ", "📊 分析・在庫", "💸 経費", "✅ ToDo", "🍔 登録", "⚙️ 予算"])
 st.sidebar.success(f"Login: **{selected_class}**")
 
-# --- 📊 予算計算 ---
-budget_rows = get_raw_data("BUDGET")
-budget = 30000 
-for r in budget_rows:
-    if r and r[0] == selected_class:
-        budget = int(r[1])
-        break
-
-class_rows = get_raw_data(selected_class)
-current_expense = 0
-if class_rows:
-    for row in class_rows[1:]:
-        if len(row) > 4 and "経費" in str(row[1]):
-            try: current_expense += int(row[4])
-            except: pass
-
-st.write(f"📊 **残金: {budget - current_expense:,}円** (予算: {budget:,}円)")
-st.progress(min(current_expense / budget, 1.0))
+# --- 予算バー ---
+try:
+    budget = 30000
+    for r in get_raw_data("BUDGET"):
+        if r and r[0] == selected_class: budget = int(r[1]); break
+    
+    c_rows = get_raw_data(selected_class)
+    expense = 0
+    if c_rows:
+        for r in c_rows[1:]:
+            if len(r) > 4 and "経費" in str(r[1]):
+                try: expense += int(str(r[4]).replace(',', ''))
+                except: pass
+    
+    rem = budget - expense
+    st.write(f"📊 **残金: {rem:,}円** (予算: {budget:,}円)")
+    st.progress(min(expense / budget, 1.0) if budget > 0 else 0)
+except: pass
 st.divider()
+
+# ==========================================
+# 💰 レジ (売り切れ機能付き)
+# ==========================================
+if menu == "💰 レジ":
+    st.subheader(f"💰 {selected_class} レジ")
+
+    @st.fragment
+    def render_pos():
+        c_menu, c_receipt = st.columns([1.5, 1])
+        menu_rows = get_raw_data("MENU")
+        # メニューデータ: [Class, Name, Price, Status]
+        my_menu = [r for r in menu_rows[1:] if r[0] == selected_class]
+
+        with c_menu:
+            if not my_menu: st.info("メニュー未登録")
+            cols = st.columns(2)
+            for i, item in enumerate(my_menu):
+                n, p = item[1], int(item[2])
+                # 4列目(index 3)が "完売" ならボタンを押せなくする
+                is_sold_out = (len(item) > 3 and item[3] == "完売")
+                
+                label = f"🚫 {n} (完売)" if is_sold_out else f"{n}\n¥{p}"
+                
+                if cols[i % 2].button(label, key=f"btn_{i}", use_container_width=True, disabled=is_sold_out):
+                    st.session_state["cart"].append({"n": n, "p": p})
+                    st.rerun() 
+
+        with c_receipt:
+            total = sum([x['p'] for x in st.session_state["cart"]])
+            with st.expander("カート", expanded=True):
+                if not st.session_state["cart"]: st.write("(空)")
+                for x in st.session_state["cart"]: st.text(f"・{x['n']} : ¥{x['p']}")
+            
+            st.metric("合計", f"¥{total:,}")
+
+            if total > 0:
+                val = st.number_input("¥", value=st.session_state["received_amount"], step=10, label_visibility="collapsed")
+                if val != st.session_state["received_amount"]:
+                    st.session_state["received_amount"] = val; st.rerun()
+                
+                b_cols = st.columns(3)
+                for i, amt in enumerate([1000, 500, 100, 50, 10, 0]):
+                    label = "C" if amt == 0 else f"+{amt}"
+                    if b_cols[i % 3].button(label, use_container_width=True):
+                        st.session_state["received_amount"] = 0 if amt == 0 else st.session_state["received_amount"] + amt
+                        st.rerun()
+
+                change = st.session_state["received_amount"] - total
+                if st.session_state["received_amount"] > 0:
+                    if change >= 0: st.success(f"お釣り: ¥{change:,}")
+                    else: st.error(f"不足: ¥{abs(change):,}")
+
+                if st.button("会計確定", type="primary", use_container_width=True):
+                    if st.session_state["received_amount"] < total and st.session_state["received_amount"] != 0:
+                        st.toast("⚠️ 金額不足", icon="🚫")
+                    else:
+                        items_str = ",".join([x['n'] for x in st.session_state["cart"]])
+                        append_data(selected_class, [datetime.now().strftime("%Y/%m/%d"), "🔵 売上", "レジ", items_str, total], "売上完了")
+                        st.session_state["cart"] = []; st.session_state["received_amount"] = 0
+            
+            if st.button("クリア", use_container_width=True):
+                st.session_state["cart"] = []; st.session_state["received_amount"] = 0; st.rerun()
+
+    render_pos()
+
+# ==========================================
+# 📊 分析・在庫管理 (新機能)
+# ==========================================
+elif menu == "📊 分析・在庫":
+    st.subheader("📊 売上分析 & 在庫管理")
+    
+    tab1, tab2 = st.tabs(["📦 在庫スイッチ", "📈 売上グラフ"])
+    
+    with tab1:
+        st.caption("商品がなくなったら「販売中」を押して「完売」にしてください")
+        menu_rows = get_raw_data("MENU")
+        my_menu = [r for r in menu_rows[1:] if r[0] == selected_class]
+        
+        if my_menu:
+            for item in my_menu:
+                n = item[1]
+                status = item[3] if len(item) > 3 else "販売中"
+                c1, c2 = st.columns([3, 1])
+                c1.write(f"**{n}**")
+                
+                btn_label = "🔴 完売にする" if status != "完売" else "🟢 販売再開"
+                if c2.button(btn_label, key=f"stock_{n}"):
+                    new_status = "完売" if status != "完売" else "販売中"
+                    update_stock_status(n, new_status)
+        else:
+            st.info("メニューがありません")
+
+    with tab2:
+        # 売上データの集計とグラフ化
+        c_rows = get_raw_data(selected_class)
+        if len(c_rows) > 1:
+            df = pd.DataFrame(c_rows[1:], columns=c_rows[0])
+            # 売上データのみ抽出
+            if "種別" in df.columns and "内容" in df.columns:
+                sales_df = df[df["種別"].astype(str).str.contains("売上")]
+                
+                # 商品ごとのカウント（カンマ区切りの商品を分解）
+                item_counts = {}
+                for items in sales_df["内容"]:
+                    for item in items.split(","):
+                        i_name = item.strip()
+                        item_counts[i_name] = item_counts.get(i_name, 0) + 1
+                
+                if item_counts:
+                    chart_data = pd.DataFrame(list(item_counts.items()), columns=["商品", "個数"]).set_index("商品")
+                    st.bar_chart(chart_data)
+                    st.caption("※セット販売なども1個としてカウントされます")
+                else:
+                    st.info("まだ売上がありません")
+        else:
+            st.info("データがありません")
 
 # ==========================================
 # 💸 経費入力
 # ==========================================
-if menu == "💸 経費入力":
+elif menu == "💸 経費":
     st.subheader(f"💸 {selected_class} 経費")
     with st.form("exp"):
         c1, c2 = st.columns(2)
@@ -144,8 +282,9 @@ if menu == "💸 経費入力":
         p = c2.text_input("担当")
         i = st.text_input("品名")
         a = st.number_input("金額", min_value=0, step=1)
-        if st.form_submit_button("登録"):
-            append_data(selected_class, [d.strftime("%Y/%m/%d"), "🔴 経費", p, i, a])
+        if st.form_submit_button("登録", use_container_width=True):
+            if not i or a <= 0: st.error("入力を確認してください")
+            else: append_data(selected_class, [d.strftime("%Y/%m/%d"), "🔴 経費", p, i, a])
 
 # ==========================================
 # ✅ ToDo
@@ -156,111 +295,70 @@ elif menu == "✅ ToDo":
         with st.form("todo"):
             t = st.text_input("内容")
             p = st.text_input("担当")
-            if st.form_submit_button("書き込む"):
-                append_data("TODO", [selected_class, datetime.now().strftime("%Y/%m/%d"), t, p, "未完了"])
-
+            if st.form_submit_button("書き込む", use_container_width=True):
+                if t: append_data("TODO", [selected_class, datetime.now().strftime("%Y/%m/%d"), t, p, "未完了"])
     st.divider()
-    all_todos = get_raw_data("TODO")
-    if len(all_todos) > 1:
-        active = [r + [idx+1] for idx, r in enumerate(all_todos) if idx > 0 and r[0] == selected_class and "未完了" in r[4]]
-        
-        if active:
-            st.caption("チェックして「完了」ボタンを押してください")
-            updates = []
-            for task in active:
-                if st.checkbox(f"{task[2]} ({task[3]})", key=f"chk_{task[-1]}"):
-                    updates.append(task[-1])
-            
-            if updates and st.button("完了にする"):
-                gc = get_gc()
-                sh = gc.open(SPREADSHEET_NAME).worksheet("TODO")
-                for ridx in updates: sh.update_cell(ridx, 5, "完了")
-                get_raw_data.clear(); st.success("更新！"); time.sleep(0.3); st.rerun()
-        else: st.info("タスクなし")
-    else: st.info("タスクなし")
-
-# ==========================================
-# 💰 レジ
-# ==========================================
-elif menu == "💰 レジ":
-    st.subheader(f"💰 {selected_class} レジ")
-    c_menu, c_receipt = st.columns([1.5, 1])
-
-    menu_rows = get_raw_data("MENU")
-    my_menu = [r for r in menu_rows[1:] if r[0] == selected_class]
-
-    with c_menu:
-        if not my_menu: st.info("メニュー未登録")
-        cols = st.columns(2) # ★スマホで見やすいように2列に設定
-        for i, item in enumerate(my_menu):
-            name, price = item[1], int(item[2])
-            if cols[i % 2].button(f"{name}\n¥{price}", key=f"btn_{i}", use_container_width=True):
-                st.session_state["cart"].append({"n": name, "p": price})
-                st.rerun()
-
-    with c_receipt:
-        total = sum([x['p'] for x in st.session_state["cart"]])
-        with st.expander("カート", expanded=True):
-            if not st.session_state["cart"]: st.write("(空)")
-            for x in st.session_state["cart"]: st.text(f"・{x['n']} : ¥{x['p']}")
-        
-        st.metric("合計", f"¥{total:,}")
-
-        if total > 0:
-            val = st.number_input("¥", value=st.session_state["received_amount"], step=10, label_visibility="collapsed")
-            if val != st.session_state["received_amount"]:
-                st.session_state["received_amount"] = val; st.rerun()
-            
-            b_cols = st.columns(3)
-            for i, amt in enumerate([1000, 500, 100, 50, 10, 0]):
-                if b_cols[i % 3].button(f"+{amt}" if amt else "C", use_container_width=True):
-                    st.session_state["received_amount"] = 0 if amt == 0 else st.session_state["received_amount"] + amt
-                    st.rerun()
-
-            change = st.session_state["received_amount"] - total
-            if st.session_state["received_amount"] > 0:
-                if change >= 0: st.success(f"お釣り: ¥{change:,}")
-                else: st.error(f"不足: ¥{abs(change):,}")
-
-        if st.button("会計確定", type="primary", use_container_width=True):
-            if total > 0:
-                items_str = ",".join([x['n'] for x in st.session_state["cart"]])
-                append_data(selected_class, [datetime.now().strftime("%Y/%m/%d"), "🔵 売上", "レジ", items_str, total])
-                st.session_state["cart"] = []; st.session_state["received_amount"] = 0
-        
-        if st.button("クリア"):
-            st.session_state["cart"] = []; st.session_state["received_amount"] = 0; st.rerun()
+    @st.fragment
+    def render_todo():
+        rows = get_raw_data("TODO")
+        if len(rows) > 1:
+            active = [r + [idx+1] for idx, r in enumerate(rows) if idx > 0 and r[0] == selected_class and "未完了" in r[4]]
+            if active:
+                st.caption("チェックして完了")
+                updates = []
+                for task in active:
+                    if st.checkbox(f"{task[2]} ({task[3]})", key=f"chk_{task[-1]}"): updates.append(task[-1])
+                if updates and st.button("完了にする", type="primary", use_container_width=True):
+                    def _update():
+                        sh = get_spreadsheet(); ws = sh.worksheet("TODO")
+                        for ridx in updates: ws.update_cell(ridx, 5, "完了")
+                    if safe_api_call(_update) is not None:
+                        get_raw_data.clear(); st.toast("更新完了"); time.sleep(0.5); st.rerun()
+            else: st.info("タスクなし")
+    render_todo()
 
 # ==========================================
 # 🍔 メニュー登録
 # ==========================================
-elif menu == "🍔 メニュー":
+elif menu == "🍔 登録":
     st.subheader("🍔 メニュー登録")
     with st.form("add_m"):
         c1, c2 = st.columns(2)
         n = c1.text_input("商品名")
         p = c2.number_input("単価", min_value=0, step=10)
-        if st.form_submit_button("追加"):
-            append_data("MENU", [selected_class, n, p])
-
+        if st.form_submit_button("追加", use_container_width=True):
+            if n and p > 0: append_data("MENU", [selected_class, n, p, "販売中"])
+            else: st.error("確認してください")
     st.divider()
-    menu_rows = get_raw_data("MENU")
-    for idx, row in enumerate(menu_rows):
+    m_rows = get_raw_data("MENU")
+    for idx, row in enumerate(m_rows):
         if idx > 0 and row[0] == selected_class:
             c1, c2 = st.columns([3, 1])
             c1.write(f"・{row[1]} : ¥{row[2]}")
             if c2.button("削除", key=f"del_{idx}"):
-                gc = get_gc()
-                sh = gc.open(SPREADSHEET_NAME).worksheet("MENU")
-                sh.delete_rows(idx + 1)
-                get_raw_data.clear(); st.success("削除！"); time.sleep(0.3); st.rerun()
+                def _del():
+                    sh = get_spreadsheet(); ws = sh.worksheet("MENU")
+                    ws.delete_rows(idx + 1)
+                if safe_api_call(_del) is not None:
+                    get_raw_data.clear(); st.toast("削除しました"); time.sleep(0.5); st.rerun()
 
 # ==========================================
 # ⚙️ 予算設定
 # ==========================================
 elif menu == "⚙️ 予算":
-    st.subheader("⚙️ 予算設定")
+    st.subheader("⚙️ 予算")
     with st.form("bud"):
-        new_b = st.number_input("新予算", value=budget, step=1000)
-        if st.form_submit_button("更新"):
-            update_budget(selected_class, new_b)
+        curr = 30000
+        try:
+            for r in get_raw_data("BUDGET"):
+                if r[0] == selected_class: curr = int(r[1]); break
+        except: pass
+        new_b = st.number_input("新予算", value=curr, step=1000)
+        if st.form_submit_button("更新", use_container_width=True):
+            def _upd():
+                sh = get_spreadsheet(); ws = sh.worksheet("BUDGET")
+                cell = ws.find(selected_class)
+                if cell: ws.update_cell(cell.row, 2, new_b)
+                else: ws.append_row([selected_class, new_b])
+            if safe_api_call(_upd) is not None:
+                get_raw_data.clear(); st.toast("予算更新"); time.sleep(0.5); st.rerun()
