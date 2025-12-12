@@ -52,7 +52,7 @@ if "is_logged_in" not in st.session_state:
         "logged_class": None, 
         "cart": [], 
         "received_amount": 0,
-        "flash_msg": None, # ★追加：画面上部にメッセージを出すための変数
+        "flash_msg": None,
         "flash_type": "success"
     })
 
@@ -71,10 +71,11 @@ def get_spreadsheet():
         st.error(f"DB接続エラー: {e}"); return None
 
 def safe_api_call(func, *args):
+    """エラーハンドリングとリトライ"""
     max_retries = 3
     for i in range(max_retries):
         try:
-            return func(*args)
+            return func(*args) # 成功したらその値を返す（重要！）
         except Exception as e:
             if i == max_retries - 1: st.error(f"通信失敗: {e}"); return None
             time.sleep(1.5 ** i)
@@ -87,7 +88,7 @@ def get_raw_data(tab_name):
     try: return sh.worksheet(tab_name).get_all_values()
     except: return []
 
-# ★改良：メッセージをセッションに保存してリロード後に表示する関数
+# メッセージセット用関数
 def set_flash_message(msg, type="success"):
     st.session_state["flash_msg"] = msg
     st.session_state["flash_type"] = type
@@ -96,19 +97,21 @@ def append_data(tab_name, row, msg="保存完了"):
     def _append():
         sh = get_spreadsheet(); ws = sh.worksheet(tab_name)
         ws.append_row(row)
+        return True # ★ここが重要！成功した合図を返す
     
     with st.spinner("送信中..."):
         if safe_api_call(_append) is not None:
             get_raw_data.clear()
-            set_flash_message(f"✅ {msg}", "success") # メッセージセット
-            time.sleep(0.5) # 少し待ってから
-            st.rerun() # リロード
+            set_flash_message(f"✅ {msg}", "success")
+            time.sleep(0.5)
+            st.rerun()
 
 def update_stock_status(item_name, status):
     def _update():
         sh = get_spreadsheet(); ws = sh.worksheet("MENU")
         cell = ws.find(item_name)
         if cell: ws.update_cell(cell.row, 4, status)
+        return True # ★ここを追加
     
     with st.spinner("更新中..."):
         if safe_api_call(_update) is not None:
@@ -145,14 +148,13 @@ if not st.session_state["is_logged_in"]:
 # ==========================================
 # 🎉 メイン画面
 # ==========================================
-# ★ここにメッセージ表示エリアを設置（一番目立つ場所）
+# ★メッセージ表示エリア
 if st.session_state["flash_msg"]:
     if st.session_state["flash_type"] == "success":
         st.success(st.session_state["flash_msg"])
     else:
         st.error(st.session_state["flash_msg"])
-    # 一度表示したら消す
-    st.session_state["flash_msg"] = None
+    st.session_state["flash_msg"] = None # 表示したら消す
 
 if st.sidebar.button("ログアウト", use_container_width=True):
     st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0})
@@ -201,7 +203,6 @@ if menu == "💰 レジ":
                 is_sold_out = (len(item) > 3 and item[3] == "完売")
                 label = f"🚫 {n} (完売)" if is_sold_out else f"{n}\n¥{p}"
                 
-                # キーを通し番号(i)にして重複回避
                 if cols[i % 2].button(label, key=f"pos_btn_{i}", use_container_width=True, disabled=is_sold_out):
                     st.session_state["cart"].append({"n": n, "p": p})
                     st.rerun() 
@@ -265,7 +266,7 @@ elif menu == "📊 分析・在庫":
                 c1.write(f"**{n}**")
                 
                 btn_label = "🔴 完売にする" if status != "完売" else "🟢 販売再開"
-                # キーを通し番号(i)にして重複回避
+                # キーを一意にする
                 if c2.button(btn_label, key=f"stock_{i}_{n}"):
                     new_status = "完売" if status != "完売" else "販売中"
                     update_stock_status(n, new_status)
@@ -330,6 +331,7 @@ elif menu == "✅ ToDo":
                     def _update():
                         sh = get_spreadsheet(); ws = sh.worksheet("TODO")
                         for ridx in updates: ws.update_cell(ridx, 5, "完了")
+                        return True # ★ここを追加
                     if safe_api_call(_update) is not None:
                         get_raw_data.clear()
                         set_flash_message("✅ タスクを完了しました")
@@ -358,10 +360,9 @@ elif menu == "🍔 登録":
     menu_rows = get_raw_data("MENU")
     
     my_menu_items = []
-    # 行番号を保持するためにenumerateを使う
     for idx, row in enumerate(menu_rows):
         if idx > 0 and row[0] == selected_class:
-            my_menu_items.append({"data": row, "idx": idx + 1}) # 行番号(1始まり)
+            my_menu_items.append({"data": row, "idx": idx + 1})
 
     if my_menu_items:
         for item in my_menu_items:
@@ -371,12 +372,11 @@ elif menu == "🍔 登録":
             c1, c2 = st.columns([3, 1])
             c1.write(f"・**{row[1]}** : ¥{row[2]}")
             
-            # 削除ボタン
-            # キーを一意にするために行番号(row_idx)を含める
             if c2.button("削除", key=f"del_menu_{row_idx}"):
                 def _del():
                     sh = get_spreadsheet(); ws = sh.worksheet("MENU")
                     ws.delete_rows(row_idx)
+                    return True # ★ここを追加
                 
                 with st.spinner("削除中..."):
                     if safe_api_call(_del) is not None:
@@ -405,6 +405,7 @@ elif menu == "⚙️ 予算":
                 cell = ws.find(selected_class)
                 if cell: ws.update_cell(cell.row, 2, new_b)
                 else: ws.append_row([selected_class, new_b])
+                return True # ★ここを追加
             if safe_api_call(_upd) is not None:
                 get_raw_data.clear()
                 set_flash_message("✅ 予算を更新しました")
