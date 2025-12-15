@@ -3,7 +3,6 @@ from datetime import datetime
 import json
 import gspread
 import time
-import pandas as pd
 
 # ==========================================
 # ⚙️ 設定エリア
@@ -19,7 +18,7 @@ st.markdown("""
     <style>
     #MainMenu, footer, header {visibility: hidden;}
     
-    /* ボタンデザイン: スマホで押しやすく、視認性を高く */
+    /* ボタンデザイン */
     div.stButton > button {
         word-break: keep-all !important; 
         overflow-wrap: break-word !important;
@@ -27,14 +26,14 @@ st.markdown("""
         min-height: 60px !important;
         padding: 8px 12px !important;
         font-weight: bold !important;
-        font-size: 18px !important; /* 文字サイズUP */
+        font-size: 18px !important;
         border-radius: 12px !important;
     }
     
     /* スピナーの色 */
     .stSpinner > div { border-top-color: #ff4b4b !important; }
     
-    /* 売り切れボタン用: グレーアウト */
+    /* 売り切れボタン用 */
     button:disabled {
         background-color: #e0e0e0 !important;
         color: #a0a0a0 !important;
@@ -43,7 +42,6 @@ st.markdown("""
         opacity: 0.8 !important;
     }
     
-    /* 全体の余白調整 */
     .block-container { padding-top: 1rem !important; padding-bottom: 3rem !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -60,7 +58,7 @@ if "is_logged_in" not in st.session_state:
     })
 
 # ==========================================
-# 🛡️ バックエンド処理（共通化・最適化）
+# 🛡️ バックエンド処理
 # ==========================================
 @st.cache_resource(ttl=3600)
 def get_spreadsheet():
@@ -74,7 +72,7 @@ def get_spreadsheet():
     except Exception as e:
         st.error(f"DB接続エラー: {e}"); return None
 
-@st.cache_data(ttl=180) # キャッシュ時間を3分に短縮してリアルタイム性を向上
+@st.cache_data(ttl=180)
 def get_raw_data(tab_name):
     """データ取得"""
     sh = get_spreadsheet()
@@ -83,27 +81,22 @@ def get_raw_data(tab_name):
     except: return []
 
 def handle_db_action(action_func, success_msg="完了しました", wait_time=0.1):
-    """【重要】書き込み処理・通知・リロードを一括管理する関数"""
+    """書き込み処理・通知・リロードを一括管理"""
     max_retries = 3
     
     with st.spinner("処理中..."):
         for i in range(max_retries):
             try:
-                # アクション実行（保存、更新、削除など）
                 action_func()
-                
-                # 成功後の処理
                 get_raw_data.clear() # キャッシュクリア
                 st.session_state["flash_msg"] = f"✅ {success_msg}"
                 st.session_state["flash_type"] = "success"
-                time.sleep(wait_time) # 演出用ウェイト（短縮）
+                time.sleep(wait_time)
                 st.rerun()
-                return # 処理終了
-                
+                return
             except Exception as e:
-                if i == max_retries - 1:
-                    st.error(f"通信エラー: {e}")
-                time.sleep(1.5 ** i) # 指数バックオフ待機
+                if i == max_retries - 1: st.error(f"通信エラー: {e}")
+                time.sleep(1.5 ** i)
 
 # ==========================================
 # 🏫 ログイン画面
@@ -111,7 +104,6 @@ def handle_db_action(action_func, success_msg="完了しました", wait_time=0.
 st.sidebar.title("🏫 クラス")
 selected_class = st.sidebar.selectbox("選択", list(CLASS_PASSWORDS.keys()), label_visibility="collapsed")
 
-# クラス切り替え検知
 if st.session_state["logged_class"] != selected_class:
     st.session_state.update({"is_logged_in": False, "logged_class": selected_class, "cart": [], "received_amount": 0, "flash_msg": None})
     st.rerun()
@@ -126,12 +118,12 @@ if not st.session_state["is_logged_in"]:
             if pw.strip() == CLASS_PASSWORDS.get(selected_class):
                 st.session_state["is_logged_in"] = True; st.rerun()
             else: st.error("パスワードが違います")
-    st.stop() # ログインしていない場合はここでストップ
+    st.stop()
 
 # ==========================================
 # 🎉 メイン画面
 # ==========================================
-# フラッシュメッセージ表示（リロード後に表示される）
+# フラッシュメッセージ
 if st.session_state["flash_msg"]:
     if st.session_state["flash_type"] == "success":
         st.success(st.session_state["flash_msg"])
@@ -139,22 +131,22 @@ if st.session_state["flash_msg"]:
         st.error(st.session_state["flash_msg"])
     st.session_state["flash_msg"] = None
 
-# サイドバーメニュー
+# サイドバー
 if st.sidebar.button("ログアウト", use_container_width=True):
     st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0})
     st.rerun()
 
-menu = st.sidebar.radio("メニュー", ["💰 レジ", "📊 分析・在庫", "💸 経費", "✅ ToDo", "🍔 登録", "⚙️ 予算"])
+# ★メニューから「分析」を削除し「在庫管理」に変更
+menu = st.sidebar.radio("メニュー", ["💰 レジ", "📦 在庫管理", "💸 経費", "✅ ToDo", "🍔 登録", "⚙️ 予算"])
 st.sidebar.success(f"Login: **{selected_class}**")
 
-# --- 予算バー表示 (軽量化) ---
+# --- 予算バー ---
 try:
-    # データ取得を最適化（必要なデータのみ抽出）
     budget_data = {r[0]: int(r[1]) for r in get_raw_data("BUDGET") if len(r) >= 2}
     budget = budget_data.get(selected_class, 30000)
     
     class_data = get_raw_data(selected_class)
-    # 経費のみ合計（リスト内包表記で高速化）
+    # 経費のみ合計
     expense = sum([int(str(r[4]).replace(',', '')) for r in class_data[1:] 
                    if len(r) > 4 and "経費" in str(r[1]) and str(r[4]).replace(',', '').isdigit()])
     
@@ -174,17 +166,15 @@ if menu == "💰 レジ":
     def render_pos():
         c_menu, c_receipt = st.columns([1.5, 1])
         
-        # メニューデータ準備
         all_menu = get_raw_data("MENU")
         my_menu = [r for r in all_menu[1:] if r[0] == selected_class]
 
-        # --- 左側: 商品ボタン ---
+        # 左側: 商品
         with c_menu:
             if not my_menu: st.info("メニュー未登録")
             cols = st.columns(2)
             for i, item in enumerate(my_menu):
                 n, p = item[1], int(item[2])
-                # 4列目が"完売"なら無効化
                 is_sold_out = (len(item) > 3 and item[3] == "完売")
                 label = f"🚫 {n}\n(完売)" if is_sold_out else f"{n}\n¥{p}"
                 
@@ -192,25 +182,22 @@ if menu == "💰 レジ":
                     st.session_state["cart"].append({"n": n, "p": p})
                     st.rerun()
 
-        # --- 右側: レシート & 会計 ---
+        # 右側: 会計
         with c_receipt:
             total = sum([x['p'] for x in st.session_state["cart"]])
             
             with st.expander("🛒 カート", expanded=True):
                 if not st.session_state["cart"]: st.write("(空)")
                 else:
-                    # カート内をシンプルに表示
                     for x in st.session_state["cart"]: st.text(f"・{x['n']} : ¥{x['p']}")
 
             st.metric("合計", f"¥{total:,}")
 
             if total > 0:
-                # 預かり金入力
                 val = st.number_input("¥", value=st.session_state["received_amount"], step=10, label_visibility="collapsed")
                 if val != st.session_state["received_amount"]:
                     st.session_state["received_amount"] = val; st.rerun()
                 
-                # 金種ボタン
                 b_cols = st.columns(3)
                 for i, amt in enumerate([1000, 500, 100, 50, 10, 0]):
                     label = "C" if amt == 0 else f"+{amt}"
@@ -218,32 +205,24 @@ if menu == "💰 レジ":
                         st.session_state["received_amount"] = 0 if amt == 0 else st.session_state["received_amount"] + amt
                         st.rerun()
 
-                # お釣り計算
                 change = st.session_state["received_amount"] - total
                 if st.session_state["received_amount"] > 0:
                     if change >= 0: st.success(f"お釣り: ¥{change:,}")
                     else: st.error(f"不足: ¥{abs(change):,}")
 
-                # 会計確定ボタン
                 if st.button("会計確定", type="primary", use_container_width=True):
                     if st.session_state["received_amount"] < total and st.session_state["received_amount"] != 0:
                         st.session_state["flash_msg"] = "⚠️ 金額が足りません"
                         st.session_state["flash_type"] = "error"
                         st.rerun()
                     else:
-                        # データを準備して保存
                         items_str = ",".join([x['n'] for x in st.session_state["cart"]])
-                        
-                        # アクション関数を定義
                         def save_sales():
                             sh = get_spreadsheet(); ws = sh.worksheet(selected_class)
                             ws.append_row([datetime.now().strftime("%Y/%m/%d"), "🔵 売上", "レジ", items_str, total])
                         
-                        # ★先にカートをクリア (処理中にリロードされても大丈夫なように)
                         st.session_state["cart"] = []
                         st.session_state["received_amount"] = 0
-                        
-                        # 共通関数で実行
                         handle_db_action(save_sales, "売上を記録しました！")
 
             if st.button("クリア", use_container_width=True):
@@ -252,53 +231,32 @@ if menu == "💰 レジ":
     render_pos()
 
 # ==========================================
-# 📊 分析・在庫
+# 📦 在庫管理 (グラフ削除済み)
 # ==========================================
-elif menu == "📊 分析・在庫":
-    st.subheader("📊 分析・在庫")
-    tab1, tab2 = st.tabs(["📦 在庫切替", "📈 売上グラフ"])
+elif menu == "📦 在庫管理":
+    st.subheader("📦 在庫管理")
+    st.caption("売り切れた商品はボタンを押して「完売」にしてください。レジで押せなくなります。")
     
-    with tab1:
-        all_menu = get_raw_data("MENU")
-        my_menu = [r for r in all_menu[1:] if r[0] == selected_class]
-        
-        if my_menu:
-            for i, item in enumerate(my_menu):
-                n = item[1]
-                status = item[3] if len(item) > 3 else "販売中"
-                c1, c2 = st.columns([3, 1])
-                c1.write(f"**{n}**")
+    all_menu = get_raw_data("MENU")
+    my_menu = [r for r in all_menu[1:] if r[0] == selected_class]
+    
+    if my_menu:
+        for i, item in enumerate(my_menu):
+            n = item[1]
+            status = item[3] if len(item) > 3 else "販売中"
+            c1, c2 = st.columns([3, 1])
+            c1.write(f"**{n}**")
+            
+            btn_label = "🔴 完売にする" if status != "完売" else "🟢 販売再開"
+            if c2.button(btn_label, key=f"stk_{i}"):
+                new_status = "完売" if status != "完売" else "販売中"
+                def update_status():
+                    sh = get_spreadsheet(); ws = sh.worksheet("MENU")
+                    cell = ws.find(n)
+                    if cell: ws.update_cell(cell.row, 4, new_status)
                 
-                btn_label = "🔴 完売にする" if status != "完売" else "🟢 販売再開"
-                if c2.button(btn_label, key=f"stk_{i}"):
-                    new_status = "完売" if status != "完売" else "販売中"
-                    
-                    def update_status():
-                        sh = get_spreadsheet(); ws = sh.worksheet("MENU")
-                        cell = ws.find(n)
-                        if cell: ws.update_cell(cell.row, 4, new_status)
-                    
-                    handle_db_action(update_status, f"{new_status}にしました")
-        else: st.info("メニューなし")
-
-    with tab2:
-        c_rows = get_raw_data(selected_class)
-        if len(c_rows) > 1:
-            df = pd.DataFrame(c_rows[1:], columns=c_rows[0])
-            if "種別" in df.columns and "内容" in df.columns:
-                sales = df[df["種別"].astype(str).str.contains("売上")]
-                # 商品ごとの集計
-                counts = {}
-                for items in sales["内容"]:
-                    for item in items.split(","):
-                        name = item.strip()
-                        counts[name] = counts.get(name, 0) + 1
-                
-                if counts:
-                    chart_df = pd.DataFrame(list(counts.items()), columns=["商品", "個数"]).set_index("商品")
-                    st.bar_chart(chart_df)
-                else: st.info("売上データなし")
-        else: st.info("データなし")
+                handle_db_action(update_status, f"{new_status}にしました")
+    else: st.info("メニューなし")
 
 # ==========================================
 # 💸 経費入力
@@ -341,7 +299,6 @@ elif menu == "✅ ToDo":
     def render_todo():
         all_todos = get_raw_data("TODO")
         if len(all_todos) > 1:
-            # アクティブなタスクのみ抽出 (データ + 行番号)
             active = [r + [idx+1] for idx, r in enumerate(all_todos) 
                       if idx > 0 and r[0] == selected_class and "未完了" in r[4]]
             
@@ -380,7 +337,6 @@ elif menu == "🍔 登録":
     st.write("📋 登録済みメニュー")
     
     menu_rows = get_raw_data("MENU")
-    # 自分のクラスのメニューのみ抽出（行番号を保持）
     my_menu_list = [{"data": r, "idx": i+1} for i, r in enumerate(menu_rows) 
                     if i > 0 and r[0] == selected_class]
     
