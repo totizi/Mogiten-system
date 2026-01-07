@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import gspread
 import time
+import pandas as pd
 
 # ==========================================
 # ⚙️ 設定エリア
@@ -136,7 +137,6 @@ if st.sidebar.button("ログアウト", use_container_width=True):
     st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0})
     st.rerun()
 
-# ★メニューから「分析」を削除し「在庫管理」に変更
 menu = st.sidebar.radio("メニュー", ["💰 レジ", "📦 在庫管理", "💸 経費", "✅ ToDo", "🍔 登録", "⚙️ 予算"])
 st.sidebar.success(f"Login: **{selected_class}**")
 
@@ -146,7 +146,6 @@ try:
     budget = budget_data.get(selected_class, 30000)
     
     class_data = get_raw_data(selected_class)
-    # 経費のみ合計
     expense = sum([int(str(r[4]).replace(',', '')) for r in class_data[1:] 
                    if len(r) > 4 and "経費" in str(r[1]) and str(r[4]).replace(',', '').isdigit()])
     
@@ -211,8 +210,9 @@ if menu == "💰 レジ":
                     else: st.error(f"不足: ¥{abs(change):,}")
 
                 if st.button("会計確定", type="primary", use_container_width=True):
-                    if st.session_state["received_amount"] < total and st.session_state["received_amount"] != 0:
-                        st.session_state["flash_msg"] = "⚠️ 金額が足りません"
+                    # ★修正: 合計金額より少ない場合（0円含む）はエラーにする
+                    if st.session_state["received_amount"] < total:
+                        st.session_state["flash_msg"] = "⚠️ 金額が足りません！"
                         st.session_state["flash_type"] = "error"
                         st.rerun()
                     else:
@@ -231,7 +231,7 @@ if menu == "💰 レジ":
     render_pos()
 
 # ==========================================
-# 📦 在庫管理 (グラフ削除済み)
+# 📦 在庫管理
 # ==========================================
 elif menu == "📦 在庫管理":
     st.subheader("📦 在庫管理")
