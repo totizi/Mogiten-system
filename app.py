@@ -5,7 +5,7 @@ import gspread
 import time
 
 # ==========================================
-# ⚙️ 設定 & CSS (変更なし)
+# ⚙️ 設定 & CSS
 # ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
 CLASS_PASSWORDS = {f"{i}HR": str(i)*2 for i in range(21, 29)}
@@ -46,13 +46,13 @@ def get_gc():
 
 @st.cache_resource
 def get_worksheet(tab_name):
-    """【高速化の肝】ワークシート接続オブジェクト自体をキャッシュ"""
+    """ワークシート接続オブジェクト自体をキャッシュ"""
     gc = get_gc()
     if not gc: return None
     try: return gc.open(SPREADSHEET_NAME).worksheet(tab_name)
     except: return None
 
-@st.cache_data(ttl=60) # 在庫反映のため1分更新
+@st.cache_data(ttl=60) 
 def get_raw_data(tab_name):
     """データ取得"""
     ws = get_worksheet(tab_name)
@@ -69,7 +69,7 @@ def execute_db_action(action_func, msg="完了"):
             st.rerun()
     except Exception as e:
         st.error(f"エラー: {e}")
-        time.sleep(1) # エラー時のみ少し待つ
+        time.sleep(1)
 
 # ==========================================
 # 🏫 ログイン
@@ -107,15 +107,13 @@ if st.sidebar.button("ログアウト", use_container_width=True):
 menu = st.sidebar.radio("メニュー", ["💰 レジ", "📦 在庫管理", "💸 経費", "✅ ToDo", "🍔 登録", "⚙️ 予算"])
 st.sidebar.success(f"Login: **{selected_class}**")
 
-# --- 📊 予算バー (超高速集計) ---
+# --- 📊 予算バー ---
 try:
-    # 予算: リスト内包表記で検索 (APIコールなし)
     budget = 30000
     for r in get_raw_data("BUDGET"):
         if len(r) >= 2 and r[0] == selected_class:
             budget = int(r[1]); break
     
-    # 経費: ジェネレータ式でメモリ節約
     class_rows = get_raw_data(selected_class)
     expense = sum(int(str(r[4]).replace(',', '')) for r in class_rows[1:] 
                   if len(r) > 4 and "経費" in str(r[1]) and str(r[4]).replace(',', '').isdigit())
@@ -136,7 +134,7 @@ if menu == "💰 レジ":
         c1, c2 = st.columns([1.5, 1])
         my_menu = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
 
-        with c1: # メニュー
+        with c1: 
             if not my_menu: st.info("メニュー未登録")
             cols = st.columns(2)
             for i, item in enumerate(my_menu):
@@ -146,7 +144,7 @@ if menu == "💰 レジ":
                 if cols[i % 2].button(label, key=f"p_{i}", use_container_width=True, disabled=sold_out):
                     st.session_state["cart"].append({"n": n, "p": p}); st.rerun()
 
-        with c2: # 会計
+        with c2: 
             total = sum(x['p'] for x in st.session_state["cart"])
             with st.expander("🛒 カート", expanded=True):
                 if not st.session_state["cart"]: st.write("(空)")
@@ -196,9 +194,9 @@ elif menu == "📦 在庫管理":
             c1.write(f"**{n}**"); c2.write(f"状態: {status}")
             
             btn_lbl = "🔴 完売にする" if status != "完売" else "🟢 販売再開"
-            if c2.button(btn_label=btn_lbl, key=f"s_{i}"):
+            # ★修正点: btn_label ではなく label 引数を使用
+            if c2.button(label=btn_lbl, key=f"s_{i}"):
                 new_stat = "完売" if status != "完売" else "販売中"
-                # 安全のためセル検索して更新
                 execute_db_action(lambda: get_worksheet("MENU").find(n) and 
                                   get_worksheet("MENU").update_cell(get_worksheet("MENU").find(n).row, 4, new_stat), 
                                   f"{new_stat}にしました")
@@ -234,7 +232,6 @@ elif menu == "✅ ToDo":
     @st.fragment
     def render_todo():
         raw = get_raw_data("TODO")
-        # index保持: [row_data..., row_idx]
         active = [r + [idx+1] for idx, r in enumerate(raw) if idx > 0 and r[0] == selected_class and "未完了" in r[4]]
         if active:
             updates = []
@@ -242,7 +239,6 @@ elif menu == "✅ ToDo":
                 if st.checkbox(f"{task[2]} ({task[3]})", key=f"chk_{task[-1]}"): updates.append(task[-1])
             if updates and st.button("完了にする", type="primary", use_container_width=True):
                 ws = get_worksheet("TODO")
-                # update_cellsで一括更新したいが、行が飛び飛びなのでループ処理
                 execute_db_action(lambda: [ws.update_cell(r, 5, "完了") for r in updates], "タスク完了")
         else: st.info("タスクなし")
     render_todo()
@@ -269,7 +265,6 @@ elif menu == "🍔 登録":
             c1, c2 = st.columns([3, 1])
             c1.write(f"・**{row[1]}** : ¥{row[2]}")
             if c2.button("削除", key=f"d_{idx}"):
-                 # 安全のため商品名検索で削除
                 execute_db_action(lambda: get_worksheet("MENU").find(row[1]) and 
                                   get_worksheet("MENU").delete_rows(get_worksheet("MENU").find(row[1]).row), 
                                   "削除完了")
