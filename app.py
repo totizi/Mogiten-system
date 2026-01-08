@@ -17,14 +17,12 @@ st.markdown("""
     <style>
     footer {visibility: hidden;}
     
-    /* === 商品ボタンのデザイン === 
-       正方形(aspect-ratio)はやめて、高さを固定(80px)にします。
-       これで1列になっても巨大化しません。 */
+    /* === 商品ボタンのデザイン（通常） === 
+       高さを80pxに固定して正方形っぽく見せる */
     div.stButton > button[kind="secondary"] {
         height: 80px !important;
         width: 100% !important;
         
-        /* 文字の配置 */
         display: flex !important;
         flex-direction: column !important;
         justify-content: center !important;
@@ -34,7 +32,7 @@ st.markdown("""
         
         padding: 2px !important; 
         font-weight: bold !important; 
-        font-size: 14px !important; /* スマホ用に少し小さく */
+        font-size: 14px !important;
         border-radius: 8px !important;
     }
 
@@ -47,21 +45,25 @@ st.markdown("""
         border-radius: 10px !important;
     }
     
-    /* === 削除ボタン === */
-    div[data-testid="column"] div.stButton > button[kind="secondary"] {
-        height: 40px !important;
+    /* === 【修正】削除ボタンの特例 === 
+       Expander（カート）の中にあるボタンだけは小さくする */
+    div[data-testid="stExpander"] div.stButton > button {
+        height: 40px !important;      /* 高さを40pxに強制 */
         min-height: 40px !important;
-        background-color: #fff0f0;
-        color: #d00;
-        border: 1px solid #ffcccc;
+        width: auto !important;
+        
+        background-color: #fff0f0 !important; /* 薄い赤背景 */
+        color: #d00 !important;               /* 赤文字 */
+        border: 1px solid #ffcccc !important; /* 赤枠 */
+        border-radius: 5px !important;
+        font-size: 14px !important;
+        padding: 0px 10px !important;
     }
     
-    /* === スマホレイアウト対策 === 
-       Streamlitはスマホだと自動で1列になりますが、
-       これを無理やり横並び（2列など）維持させる設定です */
+    /* === スマホレイアウト対策 === */
     [data-testid="column"] {
-        min-width: 0 !important; /* 最小幅制限を解除 */
-        flex: 1 1 auto !important; /* 柔軟に伸縮 */
+        min-width: 0 !important;
+        flex: 1 1 auto !important;
     }
     
     /* 売り切れボタン */
@@ -204,15 +206,13 @@ if menu == "💰 レジ":
 
     @st.fragment
     def render_pos():
-        # ★スマホでも横並びにするため、比率を調整
         c1, c2 = st.columns([1.5, 1])
-        
         my_menu = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
         cart_counts = Counter([x['n'] for x in st.session_state["cart"]])
 
         with c1: 
             if not my_menu: st.info("メニュー未登録")
-            cols = st.columns(2) # ここがスマホで横2列になります
+            cols = st.columns(2) # スマホで横2列
             for i, item in enumerate(my_menu):
                 n, p = item[1], int(item[2])
                 stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
@@ -236,8 +236,10 @@ if menu == "💰 レジ":
                     st.write("(空)")
                 else:
                     for i, item in enumerate(st.session_state["cart"]):
+                        # 削除ボタン
                         c_text, c_del = st.columns([3, 1])
                         c_text.write(f"・{item['n']}")
+                        # type="secondary" だが、上のCSSでExpander内のボタンだけ小さく上書きされる
                         if c_del.button("削除", key=f"del_cart_{i}", type="secondary"):
                             st.session_state["cart"].pop(i)
                             st.rerun()
