@@ -109,13 +109,9 @@ if st.session_state["flash_msg"]:
 
 # --- サイドバー構成 ---
 st.sidebar.title(f"🏫 {selected_class}")
-
-# モード切替
 mode = st.sidebar.selectbox("📂 モード切替", ["🎪 当日運営", "🛠 準備・前日"])
-
 st.sidebar.divider()
 
-# メニュー切り替え
 if mode == "🛠 準備・前日":
     menu = st.sidebar.radio("メニュー", ["🍔 登録", "💸 経費", "✅ ToDo", "⚙️ 予算"])
 else:
@@ -128,18 +124,42 @@ if st.sidebar.button("ログアウト", use_container_width=True):
 
 # --- メインエリア表示 ---
 
-# 予算バー
+# ★予算バー（超過時の赤色表示機能付き）★
 try:
     budget = 30000
     for r in get_raw_data("BUDGET"):
         if len(r) >= 2 and r[0] == selected_class:
             budget = int(r[1]); break
+            
     class_rows = get_raw_data(selected_class)
     expense = sum(int(str(r[4]).replace(',', '')) for r in class_rows[1:] 
                   if len(r) > 4 and "経費" in str(r[1]) and str(r[4]).replace(',', '').isdigit())
-    st.caption(f"📊 残金: {budget - expense:,}円 (予算: {budget:,}円)")
-    st.progress(min(expense / budget, 1.0) if budget > 0 else 0)
+    
+    remaining = budget - expense
+    
+    # 予算状態に応じた表示切り替え
+    if remaining < 0:
+        # 予算オーバー時：赤色バー
+        bar_color = "#ff4b4b" # 赤
+        msg = f"🚨 **予算超過: {abs(remaining):,}円** (予算: {budget:,}円)"
+        percent = 100 # バーは満タンにする
+    else:
+        # 通常時：青緑色バー
+        bar_color = "#00cc96" # 緑っぽい青
+        msg = f"📊 **残金: {remaining:,}円** (予算: {budget:,}円)"
+        percent = int((expense / budget) * 100) if budget > 0 else 0
+        percent = min(percent, 100)
+
+    st.markdown(msg)
+    # HTMLでカスタムプログレスバーを描画（色を自由に変えるため）
+    st.markdown(f"""
+        <div style="background-color: #f0f2f6; border-radius: 10px; height: 20px; width: 100%; margin-bottom: 20px;">
+            <div style="background-color: {bar_color}; width: {percent}%; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
+        </div>
+    """, unsafe_allow_html=True)
+    
 except: pass
+
 st.divider()
 
 # ==========================================
@@ -260,25 +280,24 @@ elif menu == "💸 経費":
         d, p = c1.date_input("日付"), c2.text_input("担当")
         i, a = st.text_input("品名"), st.number_input("金額", min_value=0, step=1)
         if st.form_submit_button("登録", use_container_width=True):
-            if not i or a <= 0: st.error("入力確認")
-            else: execute_db_action(lambda: get_worksheet(selected_class).append_row(
-                [d.strftime("%Y/%m/%d"), "🔴 経費", p, i, a]), "経費登録完了")
+            # ★修正: 全項目入力チェック
+            if not p or not i or a <= 0:
+                st.error("⚠️ 担当者・品名・金額をすべて入力してください")
+            else: 
+                execute_db_action(lambda: get_worksheet(selected_class).append_row(
+                    [d.strftime("%Y/%m/%d"), "🔴 経費", p, i, a]), "経費登録完了")
 
 # ==========================================
 # ✅ ToDo
 # ==========================================
 elif menu == "✅ ToDo":
     st.subheader(f"✅ {selected_class} ToDo")
-    
-    # ★修正箇所: Expander（折りたたみ）を廃止し、常にフォームを表示
     with st.form("todo"):
         t, p = st.text_input("内容"), st.text_input("担当")
         if st.form_submit_button("追加", use_container_width=True):
             if t: execute_db_action(lambda: get_worksheet("TODO").append_row(
                 [selected_class, datetime.now().strftime("%Y/%m/%d"), t, p, "未完了"]), "追加完了")
-    
     st.divider()
-    
     @st.fragment
     def render_todo():
         raw = get_raw_data("TODO")
