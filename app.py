@@ -11,40 +11,41 @@ from collections import Counter
 SPREADSHEET_NAME = "模擬店データベース"
 CLASS_PASSWORDS = {f"{i}HR": str(i)*2 for i in range(21, 29)}
 
-st.set_page_config(page_title="文化祭レジ", layout="wide") # スマホで見やすくするため初期設定シンプル化
+# ★修正: PCではサイドバーを開き、スマホでは閉じる「auto」設定に変更
+st.set_page_config(page_title="文化祭レジ", layout="wide", initial_sidebar_state="auto")
+
 st.markdown("""
     <style>
-    #MainMenu, footer, header {visibility: hidden;}
+    /* Streamlitのヘッダー（ハンバーガーメニューなど）は表示させるように戻しました 
+       #MainMenu {visibility: hidden;} 
+    */
+    footer {visibility: hidden;}
     
-    /* スマホでボタンを押しやすく */
+    /* ボタンデザイン: どんな背景色でも見やすく、押しやすく */
     div.stButton > button {
-        word-break: keep-all !important; overflow-wrap: break-word !important;
-        height: auto !important; min-height: 55px !important;
-        padding: 5px 10px !important; font-weight: bold !important; font-size: 16px !important;
+        word-break: keep-all !important; 
+        overflow-wrap: break-word !important;
+        height: auto !important; 
+        min-height: 60px !important;
+        padding: 5px 10px !important; 
+        font-weight: bold !important; 
+        font-size: 16px !important;
         border-radius: 10px !important;
-        width: 100% !important; /* 幅いっぱいに */
+        width: 100% !important;
+        /* 文字色は指定せず、テーマに任せる */
     }
     
-    /* ラジオボタン（メニュー）をスマホで押しやすいタブ風にする */
-    div[role="radiogroup"] > label {
-        background-color: #f0f2f6;
-        padding: 10px 15px;
-        border-radius: 8px;
-        margin-right: 5px;
-        border: 1px solid #dcdcdc;
-    }
-    div[role="radiogroup"] {
-        gap: 8px;
-        flex-wrap: wrap; /* スマホで折り返す */
-    }
-
-    /* 売り切れボタン */
+    /* 売り切れ・無効化ボタンのデザイン修正 
+       色を固定せず、透明度(opacity)で「押せない感」を出すことで
+       ダークモードでもライトモードでも文字が見えるようにする */
     button:disabled {
-        background-color: #e0e0e0 !important; color: #a0a0a0 !important;
-        border-color: #d0d0d0 !important; cursor: not-allowed !important; opacity: 0.8 !important;
+        opacity: 0.4 !important;       /* 全体を薄くする */
+        cursor: not-allowed !important;
+        border: 1px dashed inherit !important; /* 枠線を点線にして区別 */
     }
     
-    .block-container { padding-top: 1rem !important; padding-bottom: 5rem !important; }
+    /* 余白調整 */
+    .block-container { padding-top: 2rem !important; padding-bottom: 5rem !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -55,7 +56,7 @@ if "is_logged_in" not in st.session_state:
     })
 
 # ==========================================
-# 🚀 超高速バックエンド処理
+# 🚀 バックエンド処理
 # ==========================================
 @st.cache_resource
 def get_gc():
@@ -91,7 +92,7 @@ def execute_db_action(action_func, msg="完了"):
 # ==========================================
 if not st.session_state["is_logged_in"]:
     st.title("🏫 文化祭システム")
-    # サイドバーを使わずメイン画面に配置（スマホ対策）
+    # ログイン画面は見やすくメインエリアに配置
     selected_class = st.selectbox("クラスを選択", list(CLASS_PASSWORDS.keys()))
     with st.form("login"):
         pw = st.text_input("パスワード", type="password")
@@ -104,7 +105,7 @@ if not st.session_state["is_logged_in"]:
     st.stop()
 
 # ==========================================
-# 🎉 メイン画面 (ナビゲーション改良版)
+# 🎉 メイン画面
 # ==========================================
 selected_class = st.session_state["logged_class"]
 
@@ -114,31 +115,27 @@ if st.session_state["flash_msg"]:
     else: st.error(st.session_state["flash_msg"])
     st.session_state["flash_msg"] = None
 
-# --- ヘッダーエリア (ログアウト & クラス名) ---
-c_head1, c_head2 = st.columns([3, 1])
-c_head1.write(f"Login: **{selected_class}**")
-if c_head2.button("ログアウト", key="logout_btn"):
-    st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0})
-    st.rerun()
+# --- サイドバー構成 (PCは表示、スマホは「＞」で開く) ---
+st.sidebar.title(f"🏫 {selected_class}")
 
-# --- 📂 モード切替 (メイン画面上部に配置) ---
-# サイドバーを開かなくていいように、ここに配置
-mode = st.radio("モード選択", ["🛠 準備・前日", "🎪 当日運営"], horizontal=True, label_visibility="collapsed")
+# モード切替
+mode = st.sidebar.radio("📂 モード", ["🎪 当日運営", "🛠 準備・前日"])
+st.sidebar.divider()
 
-st.divider()
-
-# --- 📋 メニュー切り替え (モードによって中身を変える) ---
+# メニュー切り替え
 if mode == "🛠 準備・前日":
-    # ★「経費」をこちらに移動しました
-    # スマホで見やすいように短縮名で横並び
-    menu = st.radio("機能", ["🍔 登録", "💸 経費", "✅ ToDo", "⚙️ 予算"], horizontal=True)
+    menu = st.sidebar.radio("メニュー", ["🍔 登録", "💸 経費", "✅ ToDo", "⚙️ 予算"])
 else:
-    # 当日モード
-    menu = st.radio("機能", ["💰 レジ", "📦 在庫"], horizontal=True)
+    menu = st.sidebar.radio("メニュー", ["💰 レジ", "📦 在庫"])
 
-st.divider()
+st.sidebar.divider()
+if st.sidebar.button("ログアウト", use_container_width=True):
+    st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0}); st.rerun()
 
-# --- 📊 予算バー (常に表示) ---
+
+# --- メインエリア表示 ---
+
+# 予算バー (全画面共通で上部に表示)
 try:
     budget = 30000
     for r in get_raw_data("BUDGET"):
@@ -150,6 +147,7 @@ try:
     st.caption(f"📊 残金: {budget - expense:,}円 (予算: {budget:,}円)")
     st.progress(min(expense / budget, 1.0) if budget > 0 else 0)
 except: pass
+st.divider()
 
 # ==========================================
 # 💰 レジ
