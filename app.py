@@ -3,9 +3,11 @@ from datetime import datetime
 import json
 import gspread
 import time
+import pandas as pd
+from collections import Counter # ★追加: 個数集計用
 
 # ==========================================
-# ⚙️ 設定 & CSS
+# ⚙️ 設定エリア
 # ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
 CLASS_PASSWORDS = {f"{i}HR": str(i)*2 for i in range(21, 29)}
@@ -128,7 +130,6 @@ if menu == "💰 レジ":
     @st.fragment
     def render_pos():
         c1, c2 = st.columns([1.5, 1])
-        # MENUシート: [Class, Name, Price, Status, Stock]
         my_menu = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
 
         with c1: 
@@ -136,19 +137,11 @@ if menu == "💰 レジ":
             cols = st.columns(2)
             for i, item in enumerate(my_menu):
                 n, p = item[1], int(item[2])
-                # 在庫情報の取得 (E列=index 4)
                 stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
                 status = item[3] if len(item) > 3 else "販売中"
-                
-                # 在庫0 または 状態が完売なら売り切れ扱い
                 is_sold_out = (status == "完売" or stock <= 0)
                 
-                # ボタンのラベル
-                if is_sold_out:
-                    label = f"🚫 {n}\n(完売)"
-                else:
-                    label = f"{n}\n¥{p} (残{stock})"
-
+                label = f"🚫 {n}\n(完売)" if is_sold_out else f"{n}\n¥{p} (残{stock})"
                 if cols[i % 2].button(label, key=f"p_{i}", use_container_width=True, disabled=is_sold_out):
                     st.session_state["cart"].append({"n": n, "p": p}); st.rerun()
 
@@ -179,11 +172,12 @@ if menu == "💰 レジ":
                     if st.session_state["received_amount"] < total:
                         st.session_state["flash_msg"] = "⚠️ 金額不足"; st.session_state["flash_type"] = "error"; st.rerun()
                     else:
-                        # カート内の商品名リスト
+                        # ★修正点: カート内の商品を「名前:個数」で集計する
                         cart_item_names = [x['n'] for x in st.session_state["cart"]]
+                        item_counts = Counter(cart_item_names) # 例: {'焼きそば': 2, 'フランク': 1}
+                        
                         items_str = ",".join(cart_item_names)
                         
-                        # === データベース更新処理 ===
                         def process_checkout():
                             ws_sales = get_worksheet(selected_class)
                             ws_menu = get_worksheet("MENU")
@@ -191,23 +185,22 @@ if menu == "💰 レジ":
                             # 1. 売上記録
                             ws_sales.append_row([datetime.now().strftime("%Y/%m/%d"), "🔵 売上", "レジ", items_str, total])
                             
-                            # 2. 在庫減算処理
+                            # 2. 在庫減算処理（まとめて減らす）
                             menu_data = ws_menu.get_all_values()
-                            # 各商品について在庫を減らす
-                            for c_item_name in cart_item_names:
-                                for idx, row in enumerate(menu_data):
-                                    if idx > 0 and row[0] == selected_class and row[1] == c_item_name:
-                                        # 現在の在庫を取得
-                                        current_stock = int(row[4]) if len(row) > 4 and row[4].isdigit() else 0
-                                        new_stock = max(0, current_stock - 1)
-                                        
-                                        # 在庫数更新 (E列=5)
-                                        ws_menu.update_cell(idx + 1, 5, new_stock)
-                                        
-                                        # 0になったら完売にする (D列=4)
-                                        if new_stock == 0:
-                                            ws_menu.update_cell(idx + 1, 4, "完売")
-                                        break
+                            
+                            for idx, row in enumerate(menu_data):
+                                # 自分のクラス かつ カートに含まれている商品なら
+                                if idx > 0 and row[0] == selected_class and row[1] in item_counts:
+                                    item_name = row[1]
+                                    sell_count = item_counts[item_name] # 売れた個数
+                                    
+                                    current_stock = int(row[4]) if len(row) > 4 and row[4].isdigit() else 0
+                                    new_stock = max(0, current_stock - sell_count) # まとめて引く
+                                    
+                                    # 更新
+                                    ws_menu.update_cell(idx + 1, 5, new_stock)
+                                    if new_stock == 0:
+                                        ws_menu.update_cell(idx + 1, 4, "完売")
                                         
                         st.session_state["cart"] = []; st.session_state["received_amount"] = 0
                         execute_db_action(process_checkout, "売上＆在庫更新完了")
@@ -230,22 +223,14 @@ elif menu == "📦 在庫管理":
             
             c1, c2, c3 = st.columns([2, 1, 1])
             c1.write(f"**{n}**")
-            
-            # 在庫数変更フォーム
             new_stock = c2.number_input(f"在庫 ({n})", value=stock, min_value=0, step=1, label_visibility="collapsed", key=f"inp_{i}")
-            
-            # 更新ボタン
             if c3.button("更新", key=f"upd_{i}"):
                 def update_stock():
                     ws = get_worksheet("MENU")
                     cell = ws.find(n)
                     if cell:
-                        # 在庫更新
                         ws.update_cell(cell.row, 5, new_stock)
-                        # 在庫が復活したら「販売中」に戻す、0なら「完売」
-                        new_status = "完売" if new_stock == 0 else "販売中"
-                        ws.update_cell(cell.row, 4, new_status)
-                        
+                        ws.update_cell(cell.row, 4, "完売" if new_stock == 0 else "販売中")
                 execute_db_action(update_stock, f"{n}の在庫を{new_stock}個にしました")
     else: st.info("メニューなし")
 
@@ -298,12 +283,9 @@ elif menu == "🍔 登録":
         c1, c2, c3 = st.columns([2, 1, 1])
         n = c1.text_input("商品名")
         p = c2.number_input("単価", min_value=0, step=10)
-        # ★在庫入力欄を追加
         s = c3.number_input("在庫数", min_value=1, value=50, step=1)
-        
         if st.form_submit_button("追加", use_container_width=True):
             if n and p > 0:
-                # [クラス, 商品名, 単価, 状態, 在庫] の順で保存
                 execute_db_action(lambda: get_worksheet("MENU").append_row(
                     [selected_class, n, p, "販売中", s]), f"「{n}」を{s}個で追加")
             else: st.error("入力確認")
