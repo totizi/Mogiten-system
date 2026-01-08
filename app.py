@@ -11,17 +11,13 @@ from collections import Counter
 SPREADSHEET_NAME = "模擬店データベース"
 CLASS_PASSWORDS = {f"{i}HR": str(i)*2 for i in range(21, 29)}
 
-# ★修正: PCではサイドバーを開き、スマホでは閉じる「auto」設定に変更
 st.set_page_config(page_title="文化祭レジ", layout="wide", initial_sidebar_state="auto")
 
 st.markdown("""
     <style>
-    /* Streamlitのヘッダー（ハンバーガーメニューなど）は表示させるように戻しました 
-       #MainMenu {visibility: hidden;} 
-    */
     footer {visibility: hidden;}
     
-    /* ボタンデザイン: どんな背景色でも見やすく、押しやすく */
+    /* ボタンデザイン */
     div.stButton > button {
         word-break: keep-all !important; 
         overflow-wrap: break-word !important;
@@ -32,16 +28,13 @@ st.markdown("""
         font-size: 16px !important;
         border-radius: 10px !important;
         width: 100% !important;
-        /* 文字色は指定せず、テーマに任せる */
     }
     
-    /* 売り切れ・無効化ボタンのデザイン修正 
-       色を固定せず、透明度(opacity)で「押せない感」を出すことで
-       ダークモードでもライトモードでも文字が見えるようにする */
+    /* 売り切れ・無効化ボタン */
     button:disabled {
-        opacity: 0.4 !important;       /* 全体を薄くする */
+        opacity: 0.4 !important;
         cursor: not-allowed !important;
-        border: 1px dashed inherit !important; /* 枠線を点線にして区別 */
+        border: 1px dashed inherit !important;
     }
     
     /* 余白調整 */
@@ -92,7 +85,6 @@ def execute_db_action(action_func, msg="完了"):
 # ==========================================
 if not st.session_state["is_logged_in"]:
     st.title("🏫 文化祭システム")
-    # ログイン画面は見やすくメインエリアに配置
     selected_class = st.selectbox("クラスを選択", list(CLASS_PASSWORDS.keys()))
     with st.form("login"):
         pw = st.text_input("パスワード", type="password")
@@ -115,14 +107,15 @@ if st.session_state["flash_msg"]:
     else: st.error(st.session_state["flash_msg"])
     st.session_state["flash_msg"] = None
 
-# --- サイドバー構成 (PCは表示、スマホは「＞」で開く) ---
+# --- サイドバー構成 ---
 st.sidebar.title(f"🏫 {selected_class}")
 
-# モード切替
-mode = st.sidebar.radio("📂 モード", ["🎪 当日運営", "🛠 準備・前日"])
+# ★変更点: モード切替をプルダウン(selectbox)に変更
+mode = st.sidebar.selectbox("📂 モード切替", ["🎪 当日運営", "🛠 準備・前日"])
+
 st.sidebar.divider()
 
-# メニュー切り替え
+# メニュー切り替え（ここはラジオボタンのまま）
 if mode == "🛠 準備・前日":
     menu = st.sidebar.radio("メニュー", ["🍔 登録", "💸 経費", "✅ ToDo", "⚙️ 予算"])
 else:
@@ -135,7 +128,7 @@ if st.sidebar.button("ログアウト", use_container_width=True):
 
 # --- メインエリア表示 ---
 
-# 予算バー (全画面共通で上部に表示)
+# 予算バー
 try:
     budget = 30000
     for r in get_raw_data("BUDGET"):
