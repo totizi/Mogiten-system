@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 import gspread
 import time
-from collections import Counter # 集計用
+from collections import Counter
 
 # ==========================================
 # ⚙️ 設定エリア
@@ -11,27 +11,40 @@ from collections import Counter # 集計用
 SPREADSHEET_NAME = "模擬店データベース"
 CLASS_PASSWORDS = {f"{i}HR": str(i)*2 for i in range(21, 29)}
 
-st.set_page_config(page_title="文化祭レジ", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="文化祭レジ", layout="wide") # スマホで見やすくするため初期設定シンプル化
 st.markdown("""
     <style>
     #MainMenu, footer, header {visibility: hidden;}
     
-    /* ボタンデザイン */
+    /* スマホでボタンを押しやすく */
     div.stButton > button {
         word-break: keep-all !important; overflow-wrap: break-word !important;
-        height: auto !important; min-height: 60px !important;
-        padding: 8px 12px !important; font-weight: bold !important; font-size: 18px !important;
-        border-radius: 12px !important;
+        height: auto !important; min-height: 55px !important;
+        padding: 5px 10px !important; font-weight: bold !important; font-size: 16px !important;
+        border-radius: 10px !important;
+        width: 100% !important; /* 幅いっぱいに */
     }
-    .stSpinner > div { border-top-color: #ff4b4b !important; }
     
-    /* 無効化ボタンのデザイン */
+    /* ラジオボタン（メニュー）をスマホで押しやすいタブ風にする */
+    div[role="radiogroup"] > label {
+        background-color: #f0f2f6;
+        padding: 10px 15px;
+        border-radius: 8px;
+        margin-right: 5px;
+        border: 1px solid #dcdcdc;
+    }
+    div[role="radiogroup"] {
+        gap: 8px;
+        flex-wrap: wrap; /* スマホで折り返す */
+    }
+
+    /* 売り切れボタン */
     button:disabled {
         background-color: #e0e0e0 !important; color: #a0a0a0 !important;
         border-color: #d0d0d0 !important; cursor: not-allowed !important; opacity: 0.8 !important;
     }
     
-    .block-container { padding-top: 1rem !important; padding-bottom: 3rem !important; }
+    .block-container { padding-top: 1rem !important; padding-bottom: 5rem !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -74,63 +87,69 @@ def execute_db_action(action_func, msg="完了"):
         time.sleep(1)
 
 # ==========================================
-# 🏫 ログイン
+# 🏫 ログイン画面
 # ==========================================
-st.sidebar.title("🏫 クラス")
-selected_class = st.sidebar.selectbox("選択", list(CLASS_PASSWORDS.keys()), label_visibility="collapsed")
-
-if st.session_state["logged_class"] != selected_class:
-    st.session_state.update({"is_logged_in": False, "logged_class": selected_class, "cart": [], "received_amount": 0, "flash_msg": None})
-    st.rerun()
-
-st.sidebar.divider()
-
 if not st.session_state["is_logged_in"]:
-    st.title(f"🔒 {selected_class}")
+    st.title("🏫 文化祭システム")
+    # サイドバーを使わずメイン画面に配置（スマホ対策）
+    selected_class = st.selectbox("クラスを選択", list(CLASS_PASSWORDS.keys()))
     with st.form("login"):
         pw = st.text_input("パスワード", type="password")
         if st.form_submit_button("ログイン", type="primary", use_container_width=True):
             if pw.strip() == CLASS_PASSWORDS.get(selected_class):
-                st.session_state["is_logged_in"] = True; st.rerun()
+                st.session_state["is_logged_in"] = True
+                st.session_state["logged_class"] = selected_class
+                st.rerun()
             else: st.error("パスワードが違います")
     st.stop()
 
 # ==========================================
-# 🎉 メイン画面構成
+# 🎉 メイン画面 (ナビゲーション改良版)
 # ==========================================
+selected_class = st.session_state["logged_class"]
+
+# フラッシュメッセージ
 if st.session_state["flash_msg"]:
     if st.session_state["flash_type"] == "success": st.success(st.session_state["flash_msg"])
     else: st.error(st.session_state["flash_msg"])
     st.session_state["flash_msg"] = None
 
-if st.sidebar.button("ログアウト", use_container_width=True):
-    st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0}); st.rerun()
+# --- ヘッダーエリア (ログアウト & クラス名) ---
+c_head1, c_head2 = st.columns([3, 1])
+c_head1.write(f"Login: **{selected_class}**")
+if c_head2.button("ログアウト", key="logout_btn"):
+    st.session_state.update({"is_logged_in": False, "cart": [], "received_amount": 0})
+    st.rerun()
 
-st.sidebar.success(f"Login: **{selected_class}**")
+# --- 📂 モード切替 (メイン画面上部に配置) ---
+# サイドバーを開かなくていいように、ここに配置
+mode = st.radio("モード選択", ["🛠 準備・前日", "🎪 当日運営"], horizontal=True, label_visibility="collapsed")
 
-# ★ここから変更：モード切替★
-mode = st.sidebar.selectbox("📂 モード切替", ["🎪 当日運営モード", "🛠 準備・設定モード"])
+st.divider()
 
-if mode == "🎪 当日運営モード":
-    menu = st.sidebar.radio("メニュー", ["💰 レジ", "📦 在庫管理", "💸 経費入力"], label_visibility="collapsed")
+# --- 📋 メニュー切り替え (モードによって中身を変える) ---
+if mode == "🛠 準備・前日":
+    # ★「経費」をこちらに移動しました
+    # スマホで見やすいように短縮名で横並び
+    menu = st.radio("機能", ["🍔 登録", "💸 経費", "✅ ToDo", "⚙️ 予算"], horizontal=True)
 else:
-    menu = st.sidebar.radio("メニュー", ["🍔 メニュー登録", "✅ ToDo (掲示板)", "⚙️ 予算設定"], label_visibility="collapsed")
+    # 当日モード
+    menu = st.radio("機能", ["💰 レジ", "📦 在庫"], horizontal=True)
 
-# --- 📊 予算バー ---
+st.divider()
+
+# --- 📊 予算バー (常に表示) ---
 try:
     budget = 30000
     for r in get_raw_data("BUDGET"):
         if len(r) >= 2 and r[0] == selected_class:
             budget = int(r[1]); break
-    
     class_rows = get_raw_data(selected_class)
     expense = sum(int(str(r[4]).replace(',', '')) for r in class_rows[1:] 
                   if len(r) > 4 and "経費" in str(r[1]) and str(r[4]).replace(',', '').isdigit())
-    
-    st.write(f"📊 **残金: {budget - expense:,}円** (予算: {budget:,}円)")
+    st.caption(f"📊 残金: {budget - expense:,}円 (予算: {budget:,}円)")
     st.progress(min(expense / budget, 1.0) if budget > 0 else 0)
 except: pass
-st.divider()
 
 # ==========================================
 # 💰 レジ
@@ -157,7 +176,7 @@ if menu == "💰 レジ":
                 is_disabled = (status == "完売" or stock <= 0 or remaining_addable == 0)
                 
                 if status == "完売" or stock <= 0: label = f"🚫 {n}\n(完売)"
-                elif remaining_addable == 0: label = f"🚫 {n}\n(カート上限)"
+                elif remaining_addable == 0: label = f"🚫 {n}\n(上限)"
                 else: label = f"{n}\n¥{p} (残{stock})"
 
                 if cols[i % 2].button(label, key=f"p_{i}", use_container_width=True, disabled=is_disabled):
@@ -219,13 +238,12 @@ if menu == "💰 レジ":
 # ==========================================
 # 📦 在庫管理
 # ==========================================
-elif menu == "📦 在庫管理":
+elif menu == "📦 在庫":
     st.subheader("📦 在庫管理")
     my_menu = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
     if my_menu:
         for i, item in enumerate(my_menu):
             n = item[1]
-            status = item[3] if len(item) > 3 else "販売中"
             stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
             
             c1, c2, c3 = st.columns([2, 1, 1])
@@ -238,13 +256,13 @@ elif menu == "📦 在庫管理":
                     if cell:
                         ws.update_cell(cell.row, 5, new_stock)
                         ws.update_cell(cell.row, 4, "完売" if new_stock == 0 else "販売中")
-                execute_db_action(update_stock, f"{n}の在庫を{new_stock}個にしました")
+                execute_db_action(update_stock, f"在庫更新: {new_stock}個")
     else: st.info("メニューなし")
 
 # ==========================================
 # 💸 経費入力
 # ==========================================
-elif menu == "💸 経費入力":
+elif menu == "💸 経費":
     st.subheader(f"💸 {selected_class} 経費")
     with st.form("exp"):
         c1, c2 = st.columns(2)
@@ -258,7 +276,7 @@ elif menu == "💸 経費入力":
 # ==========================================
 # ✅ ToDo
 # ==========================================
-elif menu == "✅ ToDo (掲示板)":
+elif menu == "✅ ToDo":
     st.subheader(f"✅ {selected_class} ToDo")
     with st.expander("➕ タスク追加", expanded=True):
         with st.form("todo"):
@@ -284,7 +302,7 @@ elif menu == "✅ ToDo (掲示板)":
 # ==========================================
 # 🍔 メニュー登録
 # ==========================================
-elif menu == "🍔 メニュー登録":
+elif menu == "🍔 登録":
     st.subheader("🍔 メニュー登録")
     with st.form("add_m"):
         c1, c2, c3 = st.columns([2, 1, 1])
@@ -314,7 +332,7 @@ elif menu == "🍔 メニュー登録":
 # ==========================================
 # ⚙️ 予算
 # ==========================================
-elif menu == "⚙️ 予算設定":
+elif menu == "⚙️ 予算":
     st.subheader("⚙️ 予算設定")
     curr = 30000
     for r in get_raw_data("BUDGET"):
