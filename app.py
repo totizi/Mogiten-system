@@ -110,12 +110,12 @@ if st.session_state["flash_msg"]:
 # --- サイドバー構成 ---
 st.sidebar.title(f"🏫 {selected_class}")
 
-# ★変更点: モード切替をプルダウン(selectbox)に変更
+# モード切替
 mode = st.sidebar.selectbox("📂 モード切替", ["🎪 当日運営", "🛠 準備・前日"])
 
 st.sidebar.divider()
 
-# メニュー切り替え（ここはラジオボタンのまま）
+# メニュー切り替え
 if mode == "🛠 準備・前日":
     menu = st.sidebar.radio("メニュー", ["🍔 登録", "💸 経費", "✅ ToDo", "⚙️ 予算"])
 else:
@@ -269,13 +269,16 @@ elif menu == "💸 経費":
 # ==========================================
 elif menu == "✅ ToDo":
     st.subheader(f"✅ {selected_class} ToDo")
-    with st.expander("➕ タスク追加", expanded=True):
-        with st.form("todo"):
-            t, p = st.text_input("内容"), st.text_input("担当")
-            if st.form_submit_button("追加", use_container_width=True):
-                if t: execute_db_action(lambda: get_worksheet("TODO").append_row(
-                    [selected_class, datetime.now().strftime("%Y/%m/%d"), t, p, "未完了"]), "追加完了")
+    
+    # ★修正箇所: Expander（折りたたみ）を廃止し、常にフォームを表示
+    with st.form("todo"):
+        t, p = st.text_input("内容"), st.text_input("担当")
+        if st.form_submit_button("追加", use_container_width=True):
+            if t: execute_db_action(lambda: get_worksheet("TODO").append_row(
+                [selected_class, datetime.now().strftime("%Y/%m/%d"), t, p, "未完了"]), "追加完了")
+    
     st.divider()
+    
     @st.fragment
     def render_todo():
         raw = get_raw_data("TODO")
