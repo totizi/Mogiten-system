@@ -37,8 +37,11 @@ st.markdown("""
         border: 1px dashed inherit !important;
     }
     
-    /* 余白調整 */
-    .block-container { padding-top: 2rem !important; padding-bottom: 5rem !important; }
+    /* ★修正: 余白調整（文字切れ対策） */
+    .block-container { 
+        padding-top: 3.5rem !important; /* 余白を広げました */
+        padding-bottom: 5rem !important; 
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -124,7 +127,7 @@ if st.sidebar.button("ログアウト", use_container_width=True):
 
 # --- メインエリア表示 ---
 
-# ★予算バー（超過時の赤色表示機能付き）★
+# ★予算バー（HTMLで微調整して文字切れ防止）★
 try:
     budget = 30000
     for r in get_raw_data("BUDGET"):
@@ -137,22 +140,22 @@ try:
     
     remaining = budget - expense
     
-    # 予算状態に応じた表示切り替え
     if remaining < 0:
-        # 予算オーバー時：赤色バー
         bar_color = "#ff4b4b" # 赤
-        msg = f"🚨 **予算超過: {abs(remaining):,}円** (予算: {budget:,}円)"
-        percent = 100 # バーは満タンにする
+        # HTMLで太字指定
+        msg_html = f"🚨 <b style='color: #ff4b4b'>予算超過: {abs(remaining):,}円</b> (予算: {budget:,}円)"
+        percent = 100
     else:
-        # 通常時：青緑色バー
-        bar_color = "#00cc96" # 緑っぽい青
-        msg = f"📊 **残金: {remaining:,}円** (予算: {budget:,}円)"
+        bar_color = "#00cc96" # 緑
+        msg_html = f"📊 <b>残金: {remaining:,}円</b> (予算: {budget:,}円)"
         percent = int((expense / budget) * 100) if budget > 0 else 0
         percent = min(percent, 100)
 
-    st.markdown(msg)
-    # HTMLでカスタムプログレスバーを描画（色を自由に変えるため）
+    # ひとつのHTMLブロックにまとめて描画（上部にパディングを追加）
     st.markdown(f"""
+        <div style="padding-top: 5px; margin-bottom: 5px; font-size: 16px;">
+            {msg_html}
+        </div>
         <div style="background-color: #f0f2f6; border-radius: 10px; height: 20px; width: 100%; margin-bottom: 20px;">
             <div style="background-color: {bar_color}; width: {percent}%; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
         </div>
@@ -280,7 +283,6 @@ elif menu == "💸 経費":
         d, p = c1.date_input("日付"), c2.text_input("担当")
         i, a = st.text_input("品名"), st.number_input("金額", min_value=0, step=1)
         if st.form_submit_button("登録", use_container_width=True):
-            # ★修正: 全項目入力チェック
             if not p or not i or a <= 0:
                 st.error("⚠️ 担当者・品名・金額をすべて入力してください")
             else: 
