@@ -17,17 +17,46 @@ st.markdown("""
     <style>
     footer {visibility: hidden;}
     
-    /* ボタンデザイン */
-    div.stButton > button {
-        word-break: keep-all !important; 
-        overflow-wrap: break-word !important;
-        height: auto !important; 
-        min-height: 60px !important;
-        padding: 5px 10px !important; 
+    /* === 商品ボタン（通常ボタン）のデザイン === 
+       ここを「正方形」にする設定に変更しました */
+    div.stButton > button[kind="secondary"] {
+        aspect-ratio: 1 / 1 !important; /* 正方形を強制 */
+        width: 100% !important;
+        height: auto !important;
+        
+        /* 文字の配置調整 */
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+        align-items: center !important;
+        white-space: pre-wrap !important; /* 改行を有効に */
+        line-height: 1.3 !important;
+        
+        padding: 5px !important; 
         font-weight: bold !important; 
         font-size: 16px !important;
-        border-radius: 10px !important;
+        border-radius: 12px !important;
+    }
+
+    /* === 重要なボタン（会計確定・ログインなど） ===
+       これらは正方形にせず、横長のままにします */
+    div.stButton > button[kind="primary"] {
+        aspect-ratio: auto !important;
+        min-height: 60px !important;
         width: 100% !important;
+        font-size: 18px !important;
+        font-weight: bold !important;
+        border-radius: 10px !important;
+    }
+    
+    /* === 削除ボタン（赤いやつ） === 
+       これも正方形にはせず、小さめの長方形に戻します */
+    div[data-testid="column"] div.stButton > button[kind="secondary"] {
+        aspect-ratio: auto !important; /* 正方形解除 */
+        min-height: 40px !important;
+        background-color: #fff0f0;
+        color: #d00;
+        border: 1px solid #ffcccc;
     }
     
     /* 売り切れ・無効化ボタン */
@@ -37,9 +66,9 @@ st.markdown("""
         border: 1px dashed inherit !important;
     }
     
-    /* ★修正: 余白調整（文字切れ対策） */
+    /* 余白調整 */
     .block-container { 
-        padding-top: 3.5rem !important; /* 余白を広げました */
+        padding-top: 3.5rem !important;
         padding-bottom: 5rem !important; 
     }
     </style>
@@ -127,7 +156,7 @@ if st.sidebar.button("ログアウト", use_container_width=True):
 
 # --- メインエリア表示 ---
 
-# ★予算バー（HTMLで微調整して文字切れ防止）★
+# 予算バー
 try:
     budget = 30000
     for r in get_raw_data("BUDGET"):
@@ -141,17 +170,15 @@ try:
     remaining = budget - expense
     
     if remaining < 0:
-        bar_color = "#ff4b4b" # 赤
-        # HTMLで太字指定
+        bar_color = "#ff4b4b"
         msg_html = f"🚨 <b style='color: #ff4b4b'>予算超過: {abs(remaining):,}円</b> (予算: {budget:,}円)"
         percent = 100
     else:
-        bar_color = "#00cc96" # 緑
+        bar_color = "#00cc96"
         msg_html = f"📊 <b>残金: {remaining:,}円</b> (予算: {budget:,}円)"
         percent = int((expense / budget) * 100) if budget > 0 else 0
         percent = min(percent, 100)
 
-    # ひとつのHTMLブロックにまとめて描画（上部にパディングを追加）
     st.markdown(f"""
         <div style="padding-top: 5px; margin-bottom: 5px; font-size: 16px;">
             {msg_html}
@@ -179,7 +206,7 @@ if menu == "💰 レジ":
 
         with c1: 
             if not my_menu: st.info("メニュー未登録")
-            cols = st.columns(2)
+            cols = st.columns(2) # スマホで2列表示を狙う
             for i, item in enumerate(my_menu):
                 n, p = item[1], int(item[2])
                 stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
@@ -189,9 +216,10 @@ if menu == "💰 レジ":
                 remaining_addable = max(0, stock - in_cart_qty)
                 is_disabled = (status == "完売" or stock <= 0 or remaining_addable == 0)
                 
-                if status == "完売" or stock <= 0: label = f"🚫 {n}\n(完売)"
-                elif remaining_addable == 0: label = f"🚫 {n}\n(上限)"
-                else: label = f"{n}\n¥{p} (残{stock})"
+                # 正方形ボタン内の改行を意識したラベル
+                if status == "完売" or stock <= 0: label = f"🚫\n{n}\n(完売)"
+                elif remaining_addable == 0: label = f"🚫\n{n}\n(上限)"
+                else: label = f"{n}\n¥{p}\n(残{stock})"
 
                 if cols[i % 2].button(label, key=f"p_{i}", use_container_width=True, disabled=is_disabled):
                     st.session_state["cart"].append({"n": n, "p": p}); st.rerun()
@@ -199,8 +227,16 @@ if menu == "💰 レジ":
         with c2: 
             total = sum(x['p'] for x in st.session_state["cart"])
             with st.expander("🛒 カート", expanded=True):
-                if not st.session_state["cart"]: st.write("(空)")
-                for x in st.session_state["cart"]: st.text(f"・{x['n']} : ¥{x['p']}")
+                if not st.session_state["cart"]:
+                    st.write("(空)")
+                else:
+                    for i, item in enumerate(st.session_state["cart"]):
+                        c_text, c_del = st.columns([3, 1])
+                        c_text.write(f"・{item['n']} (¥{item['p']})")
+                        # 削除ボタン
+                        if c_del.button("削除", key=f"del_cart_{i}", type="secondary"):
+                            st.session_state["cart"].pop(i)
+                            st.rerun()
             
             st.metric("合計", f"¥{total:,}")
             if total > 0:
@@ -219,6 +255,7 @@ if menu == "💰 レジ":
                     if change >= 0: st.success(f"お釣り: ¥{change:,}")
                     else: st.error(f"不足: ¥{abs(change):,}")
 
+                # 会計ボタン（primaryなので正方形にならず横長になる）
                 if st.button("会計確定", type="primary", use_container_width=True):
                     if st.session_state["received_amount"] < total:
                         st.session_state["flash_msg"] = "⚠️ 金額不足"; st.session_state["flash_type"] = "error"; st.rerun()
