@@ -4,7 +4,7 @@ import json
 import gspread
 import time
 import pandas as pd
-from collections import Counter # ★追加: 個数集計用
+from collections import Counter # 集計用
 
 # ==========================================
 # ⚙️ 設定エリア
@@ -132,6 +132,9 @@ if menu == "💰 レジ":
         c1, c2 = st.columns([1.5, 1])
         my_menu = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
 
+        # ★カートに入っている商品の数を集計
+        cart_counts = Counter([x['n'] for x in st.session_state["cart"]])
+
         with c1: 
             if not my_menu: st.info("メニュー未登録")
             cols = st.columns(2)
@@ -139,10 +142,23 @@ if menu == "💰 レジ":
                 n, p = item[1], int(item[2])
                 stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
                 status = item[3] if len(item) > 3 else "販売中"
-                is_sold_out = (status == "完売" or stock <= 0)
                 
-                label = f"🚫 {n}\n(完売)" if is_sold_out else f"{n}\n¥{p} (残{stock})"
-                if cols[i % 2].button(label, key=f"p_{i}", use_container_width=True, disabled=is_sold_out):
+                # ★修正: カートに入っている数を考慮して「あと何個入れられるか」計算
+                in_cart_qty = cart_counts[n]
+                remaining_addable = max(0, stock - in_cart_qty)
+                
+                # 在庫自体がない、またはカートに入れすぎて上限に達した場合
+                is_disabled = (status == "完売" or stock <= 0 or remaining_addable == 0)
+                
+                # 表示ラベル調整
+                if status == "完売" or stock <= 0:
+                    label = f"🚫 {n}\n(完売)"
+                elif remaining_addable == 0:
+                    label = f"🚫 {n}\n(カート上限)"
+                else:
+                    label = f"{n}\n¥{p} (残{stock})"
+
+                if cols[i % 2].button(label, key=f"p_{i}", use_container_width=True, disabled=is_disabled):
                     st.session_state["cart"].append({"n": n, "p": p}); st.rerun()
 
         with c2: 
@@ -172,35 +188,24 @@ if menu == "💰 レジ":
                     if st.session_state["received_amount"] < total:
                         st.session_state["flash_msg"] = "⚠️ 金額不足"; st.session_state["flash_type"] = "error"; st.rerun()
                     else:
-                        # ★修正点: カート内の商品を「名前:個数」で集計する
                         cart_item_names = [x['n'] for x in st.session_state["cart"]]
-                        item_counts = Counter(cart_item_names) # 例: {'焼きそば': 2, 'フランク': 1}
-                        
+                        item_counts = Counter(cart_item_names)
                         items_str = ",".join(cart_item_names)
                         
                         def process_checkout():
                             ws_sales = get_worksheet(selected_class)
                             ws_menu = get_worksheet("MENU")
-                            
-                            # 1. 売上記録
                             ws_sales.append_row([datetime.now().strftime("%Y/%m/%d"), "🔵 売上", "レジ", items_str, total])
                             
-                            # 2. 在庫減算処理（まとめて減らす）
                             menu_data = ws_menu.get_all_values()
-                            
                             for idx, row in enumerate(menu_data):
-                                # 自分のクラス かつ カートに含まれている商品なら
                                 if idx > 0 and row[0] == selected_class and row[1] in item_counts:
                                     item_name = row[1]
-                                    sell_count = item_counts[item_name] # 売れた個数
-                                    
+                                    sell_count = item_counts[item_name]
                                     current_stock = int(row[4]) if len(row) > 4 and row[4].isdigit() else 0
-                                    new_stock = max(0, current_stock - sell_count) # まとめて引く
-                                    
-                                    # 更新
+                                    new_stock = max(0, current_stock - sell_count)
                                     ws_menu.update_cell(idx + 1, 5, new_stock)
-                                    if new_stock == 0:
-                                        ws_menu.update_cell(idx + 1, 4, "完売")
+                                    if new_stock == 0: ws_menu.update_cell(idx + 1, 4, "完売")
                                         
                         st.session_state["cart"] = []; st.session_state["received_amount"] = 0
                         execute_db_action(process_checkout, "売上＆在庫更新完了")
