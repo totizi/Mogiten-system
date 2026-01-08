@@ -17,31 +17,29 @@ st.markdown("""
     <style>
     footer {visibility: hidden;}
     
-    /* === 商品ボタン（通常ボタン）のデザイン === 
-       ここを「正方形」にする設定に変更しました */
+    /* === 商品ボタンのデザイン === 
+       正方形(aspect-ratio)はやめて、高さを固定(80px)にします。
+       これで1列になっても巨大化しません。 */
     div.stButton > button[kind="secondary"] {
-        aspect-ratio: 1 / 1 !important; /* 正方形を強制 */
+        height: 80px !important;
         width: 100% !important;
-        height: auto !important;
         
-        /* 文字の配置調整 */
+        /* 文字の配置 */
         display: flex !important;
         flex-direction: column !important;
         justify-content: center !important;
         align-items: center !important;
-        white-space: pre-wrap !important; /* 改行を有効に */
-        line-height: 1.3 !important;
+        white-space: pre-wrap !important;
+        line-height: 1.2 !important;
         
-        padding: 5px !important; 
+        padding: 2px !important; 
         font-weight: bold !important; 
-        font-size: 16px !important;
-        border-radius: 12px !important;
+        font-size: 14px !important; /* スマホ用に少し小さく */
+        border-radius: 8px !important;
     }
 
-    /* === 重要なボタン（会計確定・ログインなど） ===
-       これらは正方形にせず、横長のままにします */
+    /* === 重要なボタン（会計確定など） === */
     div.stButton > button[kind="primary"] {
-        aspect-ratio: auto !important;
         min-height: 60px !important;
         width: 100% !important;
         font-size: 18px !important;
@@ -49,24 +47,30 @@ st.markdown("""
         border-radius: 10px !important;
     }
     
-    /* === 削除ボタン（赤いやつ） === 
-       これも正方形にはせず、小さめの長方形に戻します */
+    /* === 削除ボタン === */
     div[data-testid="column"] div.stButton > button[kind="secondary"] {
-        aspect-ratio: auto !important; /* 正方形解除 */
+        height: 40px !important;
         min-height: 40px !important;
         background-color: #fff0f0;
         color: #d00;
         border: 1px solid #ffcccc;
     }
     
-    /* 売り切れ・無効化ボタン */
+    /* === スマホレイアウト対策 === 
+       Streamlitはスマホだと自動で1列になりますが、
+       これを無理やり横並び（2列など）維持させる設定です */
+    [data-testid="column"] {
+        min-width: 0 !important; /* 最小幅制限を解除 */
+        flex: 1 1 auto !important; /* 柔軟に伸縮 */
+    }
+    
+    /* 売り切れボタン */
     button:disabled {
         opacity: 0.4 !important;
         cursor: not-allowed !important;
         border: 1px dashed inherit !important;
     }
     
-    /* 余白調整 */
     .block-container { 
         padding-top: 3.5rem !important;
         padding-bottom: 5rem !important; 
@@ -200,13 +204,15 @@ if menu == "💰 レジ":
 
     @st.fragment
     def render_pos():
+        # ★スマホでも横並びにするため、比率を調整
         c1, c2 = st.columns([1.5, 1])
+        
         my_menu = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
         cart_counts = Counter([x['n'] for x in st.session_state["cart"]])
 
         with c1: 
             if not my_menu: st.info("メニュー未登録")
-            cols = st.columns(2) # スマホで2列表示を狙う
+            cols = st.columns(2) # ここがスマホで横2列になります
             for i, item in enumerate(my_menu):
                 n, p = item[1], int(item[2])
                 stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
@@ -216,7 +222,6 @@ if menu == "💰 レジ":
                 remaining_addable = max(0, stock - in_cart_qty)
                 is_disabled = (status == "完売" or stock <= 0 or remaining_addable == 0)
                 
-                # 正方形ボタン内の改行を意識したラベル
                 if status == "完売" or stock <= 0: label = f"🚫\n{n}\n(完売)"
                 elif remaining_addable == 0: label = f"🚫\n{n}\n(上限)"
                 else: label = f"{n}\n¥{p}\n(残{stock})"
@@ -232,8 +237,7 @@ if menu == "💰 レジ":
                 else:
                     for i, item in enumerate(st.session_state["cart"]):
                         c_text, c_del = st.columns([3, 1])
-                        c_text.write(f"・{item['n']} (¥{item['p']})")
-                        # 削除ボタン
+                        c_text.write(f"・{item['n']}")
                         if c_del.button("削除", key=f"del_cart_{i}", type="secondary"):
                             st.session_state["cart"].pop(i)
                             st.rerun()
@@ -255,7 +259,6 @@ if menu == "💰 レジ":
                     if change >= 0: st.success(f"お釣り: ¥{change:,}")
                     else: st.error(f"不足: ¥{abs(change):,}")
 
-                # 会計ボタン（primaryなので正方形にならず横長になる）
                 if st.button("会計確定", type="primary", use_container_width=True):
                     if st.session_state["received_amount"] < total:
                         st.session_state["flash_msg"] = "⚠️ 金額不足"; st.session_state["flash_type"] = "error"; st.rerun()
