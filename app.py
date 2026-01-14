@@ -45,8 +45,8 @@ st.markdown("""
         border-radius: 10px !important;
     }
     
-    /* === 【修正】削除ボタンの特例 === 
-       Expander（カート）の中にあるボタンだけは小さくする */
+    /* === 【特例】リスト（Expander）の中にあるボタンは小さくする === 
+       カートの削除ボタンや、メニュー登録の削除ボタンに適用されます */
     div[data-testid="stExpander"] div.stButton > button {
         height: 40px !important;      /* 高さを40pxに強制 */
         min-height: 40px !important;
@@ -83,7 +83,8 @@ st.markdown("""
 if "is_logged_in" not in st.session_state:
     st.session_state.update({
         "is_logged_in": False, "logged_class": None, "cart": [], 
-        "received_amount": 0, "flash_msg": None, "flash_type": "success"
+        "received_amount": 0, "flash_msg": None, "flash_type": "success",
+        "del_confirm_idx": None # 削除確認用
     })
 
 # ==========================================
@@ -212,7 +213,7 @@ if menu == "💰 レジ":
 
         with c1: 
             if not my_menu: st.info("メニュー未登録")
-            cols = st.columns(2) # スマホで横2列
+            cols = st.columns(2) 
             for i, item in enumerate(my_menu):
                 n, p = item[1], int(item[2])
                 stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
@@ -236,10 +237,8 @@ if menu == "💰 レジ":
                     st.write("(空)")
                 else:
                     for i, item in enumerate(st.session_state["cart"]):
-                        # 削除ボタン
                         c_text, c_del = st.columns([3, 1])
                         c_text.write(f"・{item['n']}")
-                        # type="secondary" だが、上のCSSでExpander内のボタンだけ小さく上書きされる
                         if c_del.button("削除", key=f"del_cart_{i}", type="secondary"):
                             st.session_state["cart"].pop(i)
                             st.rerun()
@@ -373,18 +372,37 @@ elif menu == "🍔 登録":
             else: st.error("入力確認")
 
     st.divider()
-    my_menu = [{"d": r, "idx": i+1} for i, r in enumerate(get_raw_data("MENU")) if i > 0 and r[0] == selected_class]
-    if my_menu:
-        for item in my_menu:
-            row, idx = item["d"], item["idx"]
-            stock = row[4] if len(row) > 4 else "0"
-            c1, c2 = st.columns([3, 1])
-            c1.write(f"・**{row[1]}** : ¥{row[2]} (在庫: {stock})")
-            if c2.button("削除", key=f"d_{idx}"):
-                execute_db_action(lambda: get_worksheet("MENU").find(row[1]) and 
-                                  get_worksheet("MENU").delete_rows(get_worksheet("MENU").find(row[1]).row), 
-                                  "削除完了")
-    else: st.info("登録なし")
+    
+    # ★修正点: Expanderで囲むことでCSSの「小さいボタンルール」を適用させる
+    with st.expander("📋 登録済みメニュー一覧", expanded=True):
+        my_menu = [{"d": r, "idx": i+1} for i, r in enumerate(get_raw_data("MENU")) if i > 0 and r[0] == selected_class]
+        
+        if my_menu:
+            for item in my_menu:
+                row, idx = item["d"], item["idx"]
+                stock = row[4] if len(row) > 4 else "0"
+                
+                c1, c2 = st.columns([3, 1])
+                c1.write(f"・**{row[1]}** : ¥{row[2]} (在庫: {stock})")
+                
+                # ★修正点: 削除確認ロジック
+                # 削除確認モードかどうかチェック
+                if st.session_state["del_confirm_idx"] == idx:
+                    c2.warning("本当に削除？")
+                    c_yes, c_no = c2.columns(2)
+                    if c_yes.button("はい", key=f"yes_{idx}"):
+                        execute_db_action(lambda: get_worksheet("MENU").delete_rows(idx), "削除しました")
+                        st.session_state["del_confirm_idx"] = None # リセット
+                    if c_no.button("取消", key=f"no_{idx}"):
+                        st.session_state["del_confirm_idx"] = None
+                        st.rerun()
+                else:
+                    # 通常の削除ボタン
+                    if c2.button("削除", key=f"d_{idx}"):
+                        st.session_state["del_confirm_idx"] = idx
+                        st.rerun()
+        else:
+            st.info("登録なし")
 
 # ==========================================
 # ⚙️ 予算
