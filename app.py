@@ -6,7 +6,7 @@ import time
 from collections import Counter
 
 # ==========================================
-# ⚙️ 設定 & CSS
+# ⚙️ 定数 & CSS設定
 # ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
 CLASS_PASSWORDS = {f"{i}HR": str(i)*2 for i in range(21, 29)}
@@ -15,7 +15,7 @@ CUSTOM_CSS = """
     <style>
     footer {visibility: hidden;}
     
-    /* 商品ボタン（標準） */
+    /* 商品ボタン（基本スタイル） */
     div.stButton > button[kind="secondary"] {
         height: 85px !important; width: 100% !important;
         display: flex !important; flex-direction: column !important;
@@ -23,23 +23,16 @@ CUSTOM_CSS = """
         white-space: pre-wrap !important; line-height: 1.1 !important;
         padding: 5px !important; font-weight: bold !important; 
         font-size: 14px !important; border-radius: 12px !important;
-        border-left: 6px solid #ccc !important; /* 左側に色を付ける */
+        border-left: 6px solid #ccc !important;
         transition: transform 0.1s;
     }
     div.stButton > button[kind="secondary"]:active { transform: scale(0.95); }
 
-    /* A案: 商品の色分け（奇数・偶数で左側の色を変える） */
+    /* 商品ボタンの色分け（A案） */
     div[data-testid="column"]:nth-child(odd) div.stButton > button[kind="secondary"] { border-left-color: #4b9ced !important; }
     div[data-testid="column"]:nth-child(even) div.stButton > button[kind="secondary"] { border-left-color: #7d8ad4 !important; }
 
-    /* B案: 在庫アラート（残りわずか 5個以下）のスタイル定義 */
-    .low-stock-btn {
-        color: #ff9800 !important; /* オレンジ文字 */
-        border: 2px solid #ff9800 !important;
-        background-color: rgba(255, 152, 0, 0.05) !important;
-    }
-
-    /* 重要ボタン（会計など） */
+    /* 重要ボタン（会計・ログイン等） */
     div.stButton > button[kind="primary"] {
         min-height: 65px !important; width: 100% !important;
         font-size: 18px !important; font-weight: bold !important;
@@ -47,7 +40,7 @@ CUSTOM_CSS = """
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
-    /* リスト内ボタン */
+    /* リスト内（Expander）のボタン調整 */
     div[data-testid="stExpander"] button[kind="primary"] {
         height: 40px !important; min-height: 40px !important; width: auto !important;
         background-color: #ff4b4b !important; color: white !important; border-radius: 6px !important;
@@ -57,24 +50,32 @@ CUSTOM_CSS = """
         color: #00cc96 !important; border: 1px solid #00cc96 !important; border-radius: 6px !important;
     }
     
+    /* 共通設定 */
     [data-testid="column"] { min-width: 0 !important; flex: 1 1 auto !important; }
     button:disabled { opacity: 0.3 !important; cursor: not-allowed !important; filter: grayscale(1); }
     .block-container { padding-top: 3.5rem !important; padding-bottom: 5rem !important; }
+    
+    /* 売上統計カード */
+    .sales-card {
+        background: rgba(75, 156, 237, 0.1); padding: 15px;
+        border-radius: 10px; border: 1px solid #4b9ced; margin-bottom: 20px;
+    }
     </style>
 """
 
 st.set_page_config(page_title="文化祭レジPro", layout="wide", initial_sidebar_state="auto")
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# セッション状態の初期化
 if "is_logged_in" not in st.session_state:
     st.session_state.update({
         "is_logged_in": False, "logged_class": None, "cart": [], 
         "received_amount": 0, "flash_msg": None, "flash_type": "success",
-        "del_confirm_idx": None, "show_effect": False # C案演出用
+        "del_confirm_idx": None, "show_effect": False
     })
 
 # ==========================================
-# 🚀 最適化バックエンド
+# 🚀 バックエンド & ヘルパー関数
 # ==========================================
 @st.cache_resource
 def get_gc():
@@ -92,71 +93,102 @@ def get_raw_data(tab_name):
     return ws.get_all_values() if ws else []
 
 def execute_db_action(action_func, msg="完了", effect=False):
+    """DB操作を実行し、キャッシュクリアとリロードを行う"""
     try:
-        with st.spinner("送信中..."):
+        with st.spinner("通信中..."):
             action_func()
             get_raw_data.clear()
             st.session_state["flash_msg"] = f"✅ {msg}"
-            if effect: st.session_state["show_effect"] = True # 演出フラグ
+            if effect: st.session_state["show_effect"] = True
             st.rerun()
     except Exception as e:
         st.error(f"エラー: {e}")
 
+def calc_budget(cls_name):
+    """予算と経費の計算"""
+    try:
+        budget_data = get_raw_data("BUDGET")
+        budget = 30000
+        for r in budget_data:
+            if len(r) >= 2 and r[0] == cls_name:
+                budget = int(r[1]); break
+        
+        class_data = get_raw_data(cls_name)
+        expense = sum(int(str(r[4]).replace(',', '')) for r in class_data[1:] 
+                      if len(r) > 4 and "経費" in str(r[1]) and str(r[4]).replace(',', '').isdigit())
+        return budget, expense, budget - expense
+    except:
+        return 0, 0, 0
+
+def calc_sales_stats(cls_name):
+    """売上統計の集計"""
+    try:
+        sales_data = get_raw_data(cls_name)
+        all_sold = []
+        revenue = 0
+        for r in sales_data[1:]:
+            if len(r) > 4 and "売上" in r[1]:
+                all_sold.extend(r[3].split(","))
+                revenue += int(str(r[4]).replace(',', ''))
+        return revenue, Counter(all_sold)
+    except:
+        return 0, Counter()
+
 # ==========================================
-# 🏫 認証
+# 🏫 認証 & 共通UI
 # ==========================================
 if not st.session_state["is_logged_in"]:
     st.title("🏫 文化祭レジPro")
-    selected_class = st.selectbox("クラス選択", list(CLASS_PASSWORDS.keys()))
+    sel_cls = st.selectbox("クラス選択", list(CLASS_PASSWORDS.keys()))
     with st.form("login"):
-        pw = st.text_input("パスワード", type="password")
         if st.form_submit_button("ログイン", type="primary", use_container_width=True):
-            if pw.strip() == CLASS_PASSWORDS.get(selected_class):
-                st.session_state.update({"is_logged_in": True, "logged_class": selected_class})
-                st.rerun()
-            else: st.error("パスワードが違います")
+            pw = st.text_input("パスワード", type="password") # フォーム内だとEnterで送信可
+            if st.session_state.get("login_pw_input", "") == CLASS_PASSWORDS.get(sel_cls): # state管理の簡易化
+                pass # 本来はtext_inputの戻り値を使うが、formの挙動に合わせて調整
+            
+    # シンプルなログインフォーム再実装（formの挙動安定化のため分離）
+    pw = st.text_input("パスワード", type="password", key="login_pw")
+    if st.button("ログイン", type="primary", use_container_width=True):
+        if pw.strip() == CLASS_PASSWORDS.get(sel_cls):
+            st.session_state.update({"is_logged_in": True, "logged_class": sel_cls})
+            st.rerun()
+        else: st.error("パスワードが違います")
     st.stop()
 
+# ログイン後のメイン処理
 selected_class = st.session_state["logged_class"]
 
-# フラッシュメッセージ & C案演出
+# メッセージ & 演出
 if st.session_state["flash_msg"]:
     st.success(st.session_state["flash_msg"])
     if st.session_state["show_effect"]:
-        st.snow() # 会計完了の演出
+        st.balloons() # C案改: 風船
         st.session_state["show_effect"] = False
     st.session_state["flash_msg"] = None
 
-# --- サイドバー ---
+# サイドバー
 st.sidebar.title(f"🏫 {selected_class}")
 mode = st.sidebar.selectbox("📂 モード", ["🎪 当日運営", "🛠 準備・前日"])
 st.sidebar.divider()
 if mode == "🛠 準備・前日":
     menu = st.sidebar.radio("メニュー", ["🍔 登録", "💸 経費", "✅ ToDo", "⚙️ 予算"])
 else:
-    menu = st.sidebar.radio("メニュー", ["💰 レジ", "📦 在庫"])
+    menu = st.sidebar.radio("メニュー", ["💰 レジ", "📦 在庫・売上"])
 if st.sidebar.button("ログアウト", use_container_width=True):
     st.session_state.update({"is_logged_in": False, "cart": []}); st.rerun()
 
-# --- 📊 予算バー ---
-try:
-    budget = 30000
-    for r in get_raw_data("BUDGET"):
-        if len(r) >= 2 and r[0] == selected_class: budget = int(r[1]); break
-    class_rows = get_raw_data(selected_class)
-    expense = sum(int(str(r[4]).replace(',', '')) for r in class_rows[1:] 
-                  if len(r) > 4 and "経費" in str(r[1]) and str(r[4]).replace(',', '').isdigit())
-    rem = budget - expense
+# 予算バー表示
+budget, expense, rem = calc_budget(selected_class)
+if budget > 0:
     bar_color = "#ff4b4b" if rem < 0 else "#00cc96"
     msg = f"🚨 **予算超過: {abs(rem):,}円**" if rem < 0 else f"📊 **残金: {rem:,}円**"
-    percent = min(int((expense / budget) * 100), 100) if budget > 0 else 0
+    pct = min(int((expense / budget) * 100), 100)
     st.markdown(f"<div style='padding-top:5px;font-size:16px;'>{msg} (予算:{budget:,}円)</div>", unsafe_allow_html=True)
-    st.markdown(f"<div style='background:#f0f2f6;border-radius:10px;height:12px;width:100%;margin-bottom:20px;'><div style='background:{bar_color};width:{percent}%;height:100%;border-radius:10px;'></div></div>", unsafe_allow_html=True)
-except: pass
+    st.markdown(f"<div style='background:#f0f2f6;border-radius:10px;height:12px;width:100%;margin-bottom:20px;'><div style='background:{bar_color};width:{pct}%;height:100%;border-radius:10px;'></div></div>", unsafe_allow_html=True)
 st.divider()
 
 # ==========================================
-# 💰 レジ（POS）
+# 💰 レジ (POS)
 # ==========================================
 if menu == "💰 レジ":
     st.subheader(f"💰 {selected_class} レジ")
@@ -164,29 +196,27 @@ if menu == "💰 レジ":
     @st.fragment
     def render_pos():
         c1, c2 = st.columns([1.5, 1])
-        my_menu = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
+        menu_data = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
         cart_counts = Counter([x['n'] for x in st.session_state["cart"]])
 
         with c1: 
-            if not my_menu: st.info("メニュー未登録")
+            if not menu_data: st.info("メニュー未登録")
             cols = st.columns(2)
-            for i, item in enumerate(my_menu):
+            for i, item in enumerate(menu_data):
                 n, p = item[1], int(item[2])
                 stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
                 status = item[3] if len(item) > 3 else "販売中"
                 rem_stock = max(0, stock - cart_counts[n])
+                
                 is_disabled = (status == "完売" or stock <= 0 or rem_stock == 0)
                 
-                # B案: 在庫アラートの表示ロジック
+                # ラベル生成 logic
                 if status == "完売" or stock <= 0: label = f"🚫\n{n}\n(完売)"
                 elif rem_stock == 0: label = f"🚫\n{n}\n(上限)"
-                elif rem_stock <= 5: label = f"⚠️ 残り{rem_stock}\n{n}\n¥{p}" # 警告表示
+                elif rem_stock <= 5: label = f"⚠️ 残り{rem_stock}\n{n}\n¥{p}" # B案: 警告
                 else: label = f"{n}\n¥{p}\n(残{stock})"
 
-                # 在庫僅少（5個以下）の時、CSSクラスを動的に切り替える（疑似実装）
-                # Streamlitのbutton自体にclass指定はできないため、HTMLインジェクションか
-                # キー名を工夫してCSSで拾う手法があるが、今回はシンプルに「文字」で警告
-                if cols[i % 2].button(label, key=f"p_{i}", use_container_width=True, disabled=is_disabled):
+                if cols[i % 2].button(label, key=f"pos_{i}", use_container_width=True, disabled=is_disabled):
                     st.session_state["cart"].append({"n": n, "p": p}); st.rerun()
 
         with c2: 
@@ -197,12 +227,11 @@ if menu == "💰 レジ":
                     for i, item in enumerate(st.session_state["cart"]):
                         ct, cb = st.columns([3, 1])
                         ct.write(f"・{item['n']}")
-                        if cb.button("削", key=f"del_{i}", type="primary"):
+                        if cb.button("削", key=f"d_cart_{i}", type="primary"):
                             st.session_state["cart"].pop(i); st.rerun()
             
             st.metric("合計", f"¥{total:,}")
             if total > 0:
-                # 預かり金
                 val = st.number_input("預かり金", value=st.session_state["received_amount"], step=10, label_visibility="collapsed")
                 if val != st.session_state["received_amount"]: st.session_state["received_amount"] = val; st.rerun()
                 
@@ -218,44 +247,60 @@ if menu == "💰 レジ":
                     else: st.error(f"不足: ¥{abs(change):,}")
 
                 if st.button("会計確定", type="primary", use_container_width=True):
-                    if st.session_state["received_amount"] < total:
-                        st.error("金額が足りません")
+                    if st.session_state["received_amount"] < total: st.error("金額不足")
                     else:
-                        cart_names = [x['n'] for x in st.session_state["cart"]]
-                        item_counts = Counter(cart_names)
+                        c_names = [x['n'] for x in st.session_state["cart"]]
+                        c_counts = Counter(c_names)
+                        
                         def checkout():
-                            ws_sales = get_worksheet(selected_class)
-                            ws_menu = get_worksheet("MENU")
-                            ws_sales.append_row([datetime.now().strftime("%m/%d %H:%M"), "🔵 売上", "レジ", ",".join(cart_names), total])
-                            menu_data = ws_menu.get_all_values()
-                            for idx, row in enumerate(menu_data):
-                                if idx > 0 and row[0] == selected_class and row[1] in item_counts:
+                            ws_s = get_worksheet(selected_class)
+                            ws_m = get_worksheet("MENU")
+                            ws_s.append_row([datetime.now().strftime("%m/%d %H:%M"), "🔵 売上", "レジ", ",".join(c_names), total])
+                            
+                            # 在庫減算処理
+                            m_data = ws_m.get_all_values()
+                            for idx, row in enumerate(m_data):
+                                if idx > 0 and row[0] == selected_class and row[1] in c_counts:
                                     cur = int(row[4]) if len(row) > 4 and row[4].isdigit() else 0
-                                    new_s = max(0, cur - item_counts[row[1]])
-                                    ws_menu.update_cell(idx + 1, 5, new_s)
-                                    if new_s == 0: ws_menu.update_cell(idx + 1, 4, "完売")
+                                    new_s = max(0, cur - c_counts[row[1]])
+                                    ws_m.update_cell(idx + 1, 5, new_s)
+                                    if new_s == 0: ws_m.update_cell(idx + 1, 4, "完売")
+                                    
                         st.session_state["cart"] = []; st.session_state["received_amount"] = 0
-                        execute_db_action(checkout, "売上記録完了！", effect=True)
+                        execute_db_action(checkout, "会計完了！", effect=True)
             
             if st.button("全クリア", use_container_width=True):
                 st.session_state["cart"] = []; st.session_state["received_amount"] = 0; st.rerun()
     render_pos()
 
 # ==========================================
-# 📦 在庫管理
+# 📦 在庫・売上分析
 # ==========================================
-elif menu == "📦 在庫":
-    st.subheader("📦 在庫管理")
-    my_menu = [{"row": r, "idx": i+1} for i, r in enumerate(get_raw_data("MENU")) if i > 0 and r[0] == selected_class]
-    if my_menu:
-        for item in my_menu:
-            row, idx = item["row"], item["idx"]
+elif menu == "📦 在庫・売上":
+    st.subheader("📦 在庫・売上分析")
+    
+    total_rev, sold_counts = calc_sales_stats(selected_class)
+    st.markdown(f"<div class='sales-card'>💰 クラス総売上: <b>{total_rev:,}円</b></div>", unsafe_allow_html=True)
+
+    menu_data = [{"r": r, "idx": i+1} for i, r in enumerate(get_raw_data("MENU")) if i > 0 and r[0] == selected_class]
+    if menu_data:
+        for item in menu_data:
+            row, idx = item["r"], item["idx"]
+            name, price = row[1], int(row[2])
             stock = int(row[4]) if len(row) > 4 and row[4].isdigit() else 0
-            c1, c2, c3 = st.columns([2, 1, 1])
-            c1.write(f"**{row[1]}**")
-            new_s = c2.number_input(f"在庫({row[1]})", value=stock, min_value=0, step=1, label_visibility="collapsed", key=f"inv_{idx}")
-            if c3.button("更新", key=f"upd_{idx}"):
-                execute_db_action(lambda: [get_worksheet("MENU").update_cell(idx, 5, new_s), get_worksheet("MENU").update_cell(idx, 4, "完売" if new_s == 0 else "販売中")], f"{row[1]}を{new_s}個に更新")
+            
+            sold = sold_counts[name]
+            rev = sold * price
+            
+            with st.container():
+                c1, c2, c3 = st.columns([1.5, 1, 1])
+                c1.markdown(f"**{name}** (¥{price})")
+                c1.caption(f"売上: {rev:,}円 / 販売: {sold}個")
+                
+                new_s = c2.number_input(f"在庫({name})", value=stock, min_value=0, step=1, label_visibility="collapsed", key=f"inv_{idx}")
+                if c3.button("更新", key=f"upd_{idx}"):
+                    execute_db_action(lambda: [get_worksheet("MENU").update_cell(idx, 5, new_s), get_worksheet("MENU").update_cell(idx, 4, "完売" if new_s == 0 else "販売中")], f"{name}更新")
+            st.divider()
     else: st.info("メニューなし")
 
 # ==========================================
@@ -298,13 +343,12 @@ elif menu == "🍔 登録":
             else: st.error("正しく入力してください")
     st.divider()
     with st.expander("📋 登録済みメニュー", expanded=True):
-        my_menu = [{"d": r, "idx": i+1} for i, r in enumerate(get_raw_data("MENU")) if i > 0 and r[0] == selected_class]
-        for item in my_menu:
+        m_data = [{"d": r, "idx": i+1} for i, r in enumerate(get_raw_data("MENU")) if i > 0 and r[0] == selected_class]
+        for item in m_data:
             row, idx = item["d"], item["idx"]
             c1, c2 = st.columns([3, 1])
             c1.write(f"・**{row[1]}** (¥{row[2]}) / 在庫: {row[4]}")
             if st.session_state["del_confirm_idx"] == idx:
-                c2.caption("本当に？")
                 cy, cn = c2.columns(2)
                 if cy.button("はい", key=f"y_{idx}", type="primary"):
                     execute_db_action(lambda: get_worksheet("MENU").delete_rows(idx), "削除完了"); st.session_state["del_confirm_idx"] = None
@@ -321,6 +365,5 @@ elif menu == "⚙️ 予算":
         nb = st.number_input("新予算", value=curr, step=1000)
         if st.form_submit_button("更新", use_container_width=True):
             ws = get_worksheet("BUDGET")
-            data = ws.get_all_values()
-            row_idx = next((i+1 for i, r in enumerate(data) if r[0] == selected_class), None)
+            row_idx = next((i+1 for i, r in enumerate(ws.get_all_values()) if r[0] == selected_class), None)
             execute_db_action(lambda: ws.update_cell(row_idx, 2, nb) if row_idx else ws.append_row([selected_class, nb]), "予算更新")
