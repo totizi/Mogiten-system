@@ -139,20 +139,16 @@ def calc_sales_stats(cls_name):
 # ==========================================
 if not st.session_state["is_logged_in"]:
     st.title("🏫 文化祭レジPro")
-    sel_cls = st.selectbox("クラス選択", list(CLASS_PASSWORDS.keys()))
-    with st.form("login"):
+    # ★修正箇所: 重複していたコードを削除し、正しいフォーム構造に修正
+    selected_class = st.selectbox("クラス選択", list(CLASS_PASSWORDS.keys()))
+    with st.form("login_form"):
+        pw = st.text_input("パスワード", type="password")
         if st.form_submit_button("ログイン", type="primary", use_container_width=True):
-            pw = st.text_input("パスワード", type="password") # フォーム内だとEnterで送信可
-            if st.session_state.get("login_pw_input", "") == CLASS_PASSWORDS.get(sel_cls): # state管理の簡易化
-                pass # 本来はtext_inputの戻り値を使うが、formの挙動に合わせて調整
-            
-    # シンプルなログインフォーム再実装（formの挙動安定化のため分離）
-    pw = st.text_input("パスワード", type="password", key="login_pw")
-    if st.button("ログイン", type="primary", use_container_width=True):
-        if pw.strip() == CLASS_PASSWORDS.get(sel_cls):
-            st.session_state.update({"is_logged_in": True, "logged_class": sel_cls})
-            st.rerun()
-        else: st.error("パスワードが違います")
+            if pw.strip() == CLASS_PASSWORDS.get(selected_class):
+                st.session_state.update({"is_logged_in": True, "logged_class": selected_class})
+                st.rerun()
+            else:
+                st.error("パスワードが違います")
     st.stop()
 
 # ログイン後のメイン処理
