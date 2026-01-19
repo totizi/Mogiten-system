@@ -63,7 +63,7 @@ CUSTOM_CSS = """
     </style>
 """
 
-st.set_page_config(page_title="文化祭レジPro", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="模擬店システム", layout="wide", initial_sidebar_state="auto")
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # セッション状態の初期化
@@ -138,7 +138,7 @@ def calc_sales_stats(cls_name):
 # 🏫 認証 & 共通UI
 # ==========================================
 if not st.session_state["is_logged_in"]:
-    st.title("🏫 文化祭レジPro")
+    st.title("🏫 模擬店システム")
     # ★修正箇所: 重複していたコードを削除し、正しいフォーム構造に修正
     selected_class = st.selectbox("クラス選択", list(CLASS_PASSWORDS.keys()))
     with st.form("login_form"):
