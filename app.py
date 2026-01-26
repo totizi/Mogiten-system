@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit as st
 from datetime import datetime
 import json
 import gspread
@@ -56,46 +57,41 @@ CUSTOM_CSS = """
         color: #00cc96 !important; border: 1px solid #00cc96 !important; border-radius: 6px !important;
     }
     
-    /* 共通レイアウト調整 */
     .block-container { padding-top: 3.5rem !important; padding-bottom: 5rem !important; }
-    
     .sales-card {
         background: rgba(75, 156, 237, 0.1); padding: 15px;
         border-radius: 10px; border: 1px solid #4b9ced; margin-bottom: 20px;
     }
 
     /* =========================================
-       📱 スマホ専用レイアウト (強力な強制適用)
+       📱 スマホ専用レイアウト修正 (強力版)
        ========================================= */
     @media (max-width: 640px) {
-        /* 1. 全ての水平ブロックを「横並び」に強制する */
-        div[data-testid="stHorizontalBlock"] {
-            flex-direction: row !important;
-            flex-wrap: wrap !important;
-            gap: 0.5rem !important;
-        }
         
-        /* 2. カラムの設定: 「最小幅」を使って振る舞いを変える */
-        div[data-testid="column"] {
-            width: auto !important;
-            flex: 1 1 auto !important;
-        }
-
-        /* ★魔法のロジック★
-           - メインの左右分割（レジ・カート）は中身が大きいので、自然と幅を取って「折り返される（縦になる）」
-           - ボタン類（商品・電卓）は中身が小さいので、「横に並ぶ」
-           これを実現するために、ボタンが入っているカラムだけ幅制限を緩めます。
+        /* ★魔法のセレクタ★
+           「メインのカラム(c1,c2)」の中にある「入れ子のカラム(商品・電卓)」だけを狙い撃ちします。
+           これにより、メインレイアウトは縦積みのまま、ボタン類だけ横並びに戻します。
         */
         
-        /* 電卓・商品ボタンの文字サイズ微調整 */
-        div.stButton > button {
-            padding: 2px !important;
-            font-size: 13px !important;
+        /* 1. ネストされた水平ブロックを強制的に「横並び」にする */
+        div[data-testid="column"] [data-testid="stHorizontalBlock"],
+        div[data-testid="stExpander"] [data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+        }
+
+        /* 2. ネストされたカラムの幅制限を解除する */
+        div[data-testid="column"] [data-testid="column"],
+        div[data-testid="stExpander"] [data-testid="column"] {
+            width: auto !important;
+            flex: 1 1 auto !important;
+            min-width: 10px !important; /* これで2列や3列が入るようになる */
         }
         
-        /* 電卓ボタンは少し低くして画面に収める */
+        /* 電卓ボタンの微調整 */
         .calc-btn > button {
-            height: 50px !important;
+            height: 55px !important;
+            padding: 0 !important;
         }
     }
     </style>
