@@ -56,8 +56,7 @@ CUSTOM_CSS = """
         color: #00cc96 !important; border: 1px solid #00cc96 !important; border-radius: 6px !important;
     }
     
-    [data-testid="column"] { min-width: 0 !important; flex: 1 1 auto !important; }
-    button:disabled { opacity: 0.3 !important; cursor: not-allowed !important; filter: grayscale(1); }
+    /* 共通レイアウト調整 */
     .block-container { padding-top: 3.5rem !important; padding-bottom: 5rem !important; }
     
     .sales-card {
@@ -65,32 +64,38 @@ CUSTOM_CSS = """
         border-radius: 10px; border: 1px solid #4b9ced; margin-bottom: 20px;
     }
 
-    /* === 📱 スマホ専用レイアウト (強制グリッド化) === */
+    /* =========================================
+       📱 スマホ専用レイアウト (強力な強制適用)
+       ========================================= */
     @media (max-width: 640px) {
-        /* 水平ブロックを強制的に「横並び & 折り返し許可」にする */
+        /* 1. 全ての水平ブロックを「横並び」に強制する */
         div[data-testid="stHorizontalBlock"] {
             flex-direction: row !important;
             flex-wrap: wrap !important;
             gap: 0.5rem !important;
         }
         
-        /* カラムの幅を強制調整 */
+        /* 2. カラムの設定: 「最小幅」を使って振る舞いを変える */
         div[data-testid="column"] {
             width: auto !important;
             flex: 1 1 auto !important;
-            /* ここが重要: 
-               最小幅を約85pxにすることで、
-               - 電卓(3つ)は 85*3=255px < 画面幅 -> 横3列に並ぶ
-               - 商品(2つ)は 85*2=170px < 画面幅 -> 横2列に並ぶ
-               - メイン画面(レジ+カート)は コンテンツが多いので折り返されて縦になる
-            */
-            min-width: 85px !important; 
+        }
+
+        /* ★魔法のロジック★
+           - メインの左右分割（レジ・カート）は中身が大きいので、自然と幅を取って「折り返される（縦になる）」
+           - ボタン類（商品・電卓）は中身が小さいので、「横に並ぶ」
+           これを実現するために、ボタンが入っているカラムだけ幅制限を緩めます。
+        */
+        
+        /* 電卓・商品ボタンの文字サイズ微調整 */
+        div.stButton > button {
+            padding: 2px !important;
+            font-size: 13px !important;
         }
         
-        /* 電卓ボタンを少し小さくして収まりよくする */
+        /* 電卓ボタンは少し低くして画面に収める */
         .calc-btn > button {
             height: 50px !important;
-            padding: 0px !important;
         }
     }
     </style>
@@ -229,7 +234,8 @@ if menu == "💰 レジ":
 
     @st.fragment
     def render_pos():
-        # スマホではこの2つが縦に並ぶはず（CSSのflex-wrapにより）
+        # メインレイアウト（PC用）
+        # スマホではCSSにより、このレベルは「幅が足りないので縦に折り返される」
         c1, c2 = st.columns([1.5, 1])
         
         menu_data = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
@@ -241,6 +247,7 @@ if menu == "💰 レジ":
                 st.info("メニュー未登録")
             else:
                 # 2列ずつ描画
+                # CSSで「横並び強制」しているため、スマホでも2列が維持されるはず
                 chunk_size = 2
                 for i in range(0, len(menu_data), chunk_size):
                     row_items = menu_data[i:i+chunk_size]
