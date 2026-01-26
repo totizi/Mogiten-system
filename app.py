@@ -16,84 +16,56 @@ CUSTOM_CSS = """
     <style>
     footer {visibility: hidden;}
     
-    /* === PC・共通設定 === */
+    /* === 共通設定 === */
     .block-container { padding-top: 3.5rem !important; padding-bottom: 5rem !important; }
     
-    /* 商品ボタン */
+    /* 商品ボタン（高さ固定・色分け） */
     div.stButton > button[kind="secondary"] {
         height: 85px !important; width: 100% !important;
         display: flex !important; flex-direction: column !important;
         justify-content: center !important; align-items: center !important;
         white-space: pre-wrap !important; line-height: 1.1 !important;
-        padding: 5px !important; font-weight: bold !important; 
-        font-size: 14px !important; border-radius: 12px !important;
+        padding: 2px !important; font-weight: bold !important; 
+        font-size: 13px !important; border-radius: 12px !important;
         border-left: 6px solid #ccc !important;
     }
     div.stButton > button[kind="secondary"]:active { transform: scale(0.95); }
     div[data-testid="column"]:nth-child(odd) div.stButton > button[kind="secondary"] { border-left-color: #4b9ced !important; }
     div[data-testid="column"]:nth-child(even) div.stButton > button[kind="secondary"] { border-left-color: #7d8ad4 !important; }
 
-    /* 重要ボタン */
+    /* 会計・重要ボタン */
     div.stButton > button[kind="primary"] {
         min-height: 65px !important; width: 100% !important;
         font-size: 18px !important; font-weight: bold !important;
         border-radius: 12px !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    
-    /* 電卓ボタン */
-    .calc-btn > button {
-        height: 60px !important; font-size: 20px !important; font-weight: bold !important; margin: 0px !important;
     }
 
-    /* リスト内ボタン */
+    /* カート内の削除ボタン */
     div[data-testid="stExpander"] button[kind="primary"] {
-        height: 40px !important; width: auto !important; background-color: #ff4b4b !important; color: white !important;
-    }
-    div[data-testid="stExpander"] button[kind="secondary"] {
-        height: 40px !important; width: auto !important; color: #00cc96 !important; border: 1px solid #00cc96 !important;
+        height: 40px !important; min-height: 40px !important; width: auto !important;
+        background-color: #ff4b4b !important; color: white !important;
     }
     
+    /* 金額入力ボタン（+1000など） */
+    div[data-testid="column"] button {
+        min-height: 50px;
+    }
+
     .sales-card {
         background: rgba(75, 156, 237, 0.1); padding: 15px;
         border-radius: 10px; border: 1px solid #4b9ced; margin-bottom: 20px;
     }
-
-    /* =========================================
-       📱 スマホ専用レイアウト (最終手段)
-       ========================================= */
+    
+    /* === 📱 スマホレイアウト調整 === */
     @media (max-width: 640px) {
-        /* 水平ブロックを強制的に横並びにする */
-        div[data-testid="stHorizontalBlock"] {
-            flex-direction: row !important;
-            flex-wrap: wrap !important;
-            align-items: stretch !important;
-            gap: 4px !important; /* 隙間を詰める */
-        }
-        
-        /* カラム設定: 
-           min-widthを小さくすることで「狭くてもいいから横に並べ」と指示します。
-           3列並べたい場合、画面幅の30%程度あれば収まる計算です。
-        */
+        /* 商品ボタンの列を強制的に横並び維持 */
         div[data-testid="column"] {
-            width: auto !important;
-            flex: 1 1 30% !important; /* 3列許容設定 */
-            min-width: 80px !important; /* これより小さくはならない */
-            max-width: 100% !important;
+            min-width: 0 !important;
+            flex: 1 1 auto !important;
         }
-
-        /* メインの左右分割（レジ・カート）は中身が大きいので、
-           min-width: 80px では収まりきらず、自然に縦に落ちるはずです。
-           もし横に並んで潰れてしまう場合は、ここを調整する必要がありますが、
-           今回は「商品・電卓」の並びを優先します。
-        */
-
+        /* ボタン文字サイズ調整 */
         div.stButton > button {
-            padding: 2px !important;
-            font-size: 12px !important; /* 文字を小さくしてはみ出し防止 */
-        }
-        .calc-btn > button {
-            height: 50px !important;
+            font-size: 12px !important;
         }
     }
     </style>
@@ -102,12 +74,12 @@ CUSTOM_CSS = """
 st.set_page_config(page_title="文化祭レジPro", layout="wide", initial_sidebar_state="auto")
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# セッション初期化
 if "is_logged_in" not in st.session_state:
     st.session_state.update({
         "is_logged_in": False, "logged_class": None, "cart": [], 
         "received_amount": 0, "flash_msg": None, "flash_type": "success",
-        "del_confirm_idx": None, "show_effect": False,
-        "calc_input": "0"
+        "del_confirm_idx": None, "show_effect": False
     })
 
 # ==========================================
@@ -138,7 +110,7 @@ def execute_db_action(action_func, msg="完了", effect=False):
             get_raw_data.clear()
             st.session_state["flash_msg"] = f"✅ {msg}"
             if effect: st.session_state["show_effect"] = True
-            st.session_state["calc_input"] = "0"
+            st.session_state["received_amount"] = 0
             st.rerun()
     except gspread.exceptions.APIError: st.error("📡 通信エラー：再試行してください")
     except Exception as e: st.error(f"⚠️ エラー: {e}")
@@ -224,19 +196,20 @@ if menu == "💰 レジ":
                 chunk_size = 2
                 for i in range(0, len(menu_data), chunk_size):
                     row_items = menu_data[i:i+chunk_size]
-                    cols = st.columns(chunk_size) # gap指定なし（CSSで制御）
+                    cols = st.columns(chunk_size)
                     for j, item in enumerate(row_items):
                         n, p = item[1], int(item[2])
                         stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
                         status = item[3] if len(item) > 3 else "販売中"
                         rem_stock = max(0, stock - cart_counts[n])
-                        is_disabled = (status == "完売" or stock <= 0 or rem_stock == 0)
                         
                         label = f"🚫\n{n}\n(完売)" if (status=="完売" or stock<=0) else (f"🚫\n{n}\n(上限)" if rem_stock==0 else (f"⚠️ 残{rem_stock}\n{n}\n¥{p}" if rem_stock<=5 else f"{n}\n¥{p}\n(残{stock})"))
+                        is_disabled = (status == "完売" or stock <= 0 or rem_stock == 0)
+                        
                         if cols[j].button(label, key=f"pos_{i+j}", use_container_width=True, disabled=is_disabled):
                             st.session_state["cart"].append({"n": n, "p": p}); st.rerun()
 
-        # --- カート & 電卓エリア ---
+        # --- カート & 会計エリア ---
         with c2: 
             total = sum(x['p'] for x in st.session_state["cart"])
             with st.expander("🛒 カート", expanded=True):
@@ -249,25 +222,26 @@ if menu == "💰 レジ":
                             st.session_state["cart"].pop(i); st.rerun()
             
             st.metric("合計", f"¥{total:,}")
+            
             if total > 0:
-                st.markdown("##### 💵 預かり金")
-                current_val = st.session_state["calc_input"]
-                st.markdown(f"<div style='text-align:right; font-size:24px; font-weight:bold; background:#f0f2f6; padding:10px; border-radius:5px; margin-bottom:10px;'>¥ {int(current_val):,}</div>", unsafe_allow_html=True)
+                # ★修正: 預かり金入力を元の「ボタン加算式」に戻しました
+                st.markdown("##### 💵 預かり金入力")
                 
-                buttons = [["7", "8", "9"], ["4", "5", "6"], ["1", "2", "3"], ["0", "00", "C"]]
-                for row in buttons:
-                    cols = st.columns(3)
-                    for i, btn_label in enumerate(row):
-                        if cols[i].button(btn_label, key=f"calc_{btn_label}", use_container_width=True):
-                            if btn_label == "C": st.session_state["calc_input"] = "0"
-                            else: st.session_state["calc_input"] = btn_label if st.session_state["calc_input"]=="0" else st.session_state["calc_input"]+btn_label
-                            st.rerun()
+                # 直接入力欄
+                val = st.number_input("直接入力", value=st.session_state["received_amount"], step=10, label_visibility="collapsed")
+                if val != st.session_state["received_amount"]:
+                    st.session_state["received_amount"] = val; st.rerun()
                 
-                sc = st.columns(2)
-                if sc[0].button("ちょうど", use_container_width=True): st.session_state["calc_input"] = str(total); st.rerun()
-                if sc[1].button("+1000", use_container_width=True): st.session_state["calc_input"] = str(int(st.session_state["calc_input"]) + 1000); st.rerun()
+                # ボタン配列 (3列で表示)
+                bc = st.columns(3)
+                for i, amt in enumerate([1000, 500, 100, 50, 10, 0]):
+                    label = f"+{amt}" if amt > 0 else "C (0)"
+                    if bc[i%3].button(label, key=f"pay_{amt}", use_container_width=True):
+                        if amt == 0: st.session_state["received_amount"] = 0
+                        else: st.session_state["received_amount"] += amt
+                        st.rerun()
 
-                received = int(st.session_state["calc_input"])
+                received = st.session_state["received_amount"]
                 change = received - total
                 if received > 0:
                     if change >= 0: st.success(f"お釣り: ¥{change:,}")
@@ -291,7 +265,7 @@ if menu == "💰 レジ":
                         execute_db_action(checkout, "会計完了！", effect=True)
             
             if st.button("全クリア", use_container_width=True):
-                st.session_state.update({"cart":[], "received_amount":0, "calc_input":"0"}); st.rerun()
+                st.session_state.update({"cart":[], "received_amount":0}); st.rerun()
     render_pos()
 
 # ==========================================
