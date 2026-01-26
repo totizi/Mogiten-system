@@ -4,7 +4,7 @@ import json
 import gspread
 import time
 from collections import Counter
-import pandas as pd # ★追加: データ編集用
+import pandas as pd # データ編集用
 
 # ==========================================
 # ⚙️ 定数 & CSS設定
@@ -39,12 +39,9 @@ CUSTOM_CSS = """
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
-    /* 電卓ボタンのスタイル */
+    /* 電卓ボタン */
     .calc-btn > button {
-        height: 60px !important;
-        font-size: 20px !important;
-        font-weight: bold !important;
-        margin: 0px !important;
+        height: 60px !important; font-size: 20px !important; font-weight: bold !important; margin: 0px !important;
     }
 
     /* 共通設定 */
@@ -68,11 +65,11 @@ if "is_logged_in" not in st.session_state:
         "is_logged_in": False, "logged_class": None, "cart": [], 
         "received_amount": 0, "flash_msg": None, "flash_type": "success",
         "del_confirm_idx": None, "show_effect": False,
-        "calc_input": "0" # 電卓入力用
+        "calc_input": "0"
     })
 
 # ==========================================
-# 🚀 バックエンド (④ エラーハンドリング強化)
+# 🚀 バックエンド
 # ==========================================
 @st.cache_resource
 def get_gc():
@@ -89,7 +86,7 @@ def get_worksheet(tab_name):
     try:
         return gc.open(SPREADSHEET_NAME).worksheet(tab_name) if gc else None
     except Exception:
-        return None # 接続エラー時はNoneを返す
+        return None
 
 @st.cache_data(ttl=60) 
 def get_raw_data(tab_name):
@@ -107,7 +104,7 @@ def execute_db_action(action_func, msg="完了", effect=False):
             get_raw_data.clear() # キャッシュクリア
             st.session_state["flash_msg"] = f"✅ {msg}"
             if effect: st.session_state["show_effect"] = True
-            st.session_state["calc_input"] = "0" # 計算後は電卓リセット
+            st.session_state["calc_input"] = "0"
             st.rerun()
     except gspread.exceptions.APIError:
         st.error("📡 通信エラー：ネットワークが不安定です。もう一度押してください。")
@@ -121,7 +118,6 @@ def calc_budget(cls_name):
         for r in budget_data:
             if len(r) >= 2 and r[0] == cls_name:
                 budget = int(r[1]); break
-        
         class_data = get_raw_data(cls_name)
         expense = sum(int(str(r[4]).replace(',', '')) for r in class_data[1:] 
                       if len(r) > 4 and "経費" in str(r[1]) and str(r[4]).replace(',', '').isdigit())
@@ -233,39 +229,28 @@ if menu == "💰 レジ":
             if total > 0:
                 st.markdown("##### 💵 預かり金")
                 
-                # --- ② 電卓UI ---
+                # 電卓UI
                 current_val = st.session_state["calc_input"]
                 st.markdown(f"<div style='text-align:right; font-size:24px; font-weight:bold; background:#f0f2f6; padding:10px; border-radius:5px; margin-bottom:10px;'>¥ {int(current_val):,}</div>", unsafe_allow_html=True)
                 
-                # 電卓ボタン配列
                 calc_cols = st.columns(3)
-                buttons = [
-                    ["7", "8", "9"],
-                    ["4", "5", "6"],
-                    ["1", "2", "3"],
-                    ["0", "00", "C"]
-                ]
+                buttons = [["7", "8", "9"], ["4", "5", "6"], ["1", "2", "3"], ["0", "00", "C"]]
                 for row in buttons:
                     cols = st.columns(3)
                     for i, btn_label in enumerate(row):
                         if cols[i].button(btn_label, key=f"calc_{btn_label}", use_container_width=True):
-                            if btn_label == "C":
-                                st.session_state["calc_input"] = "0"
+                            if btn_label == "C": st.session_state["calc_input"] = "0"
                             else:
-                                if st.session_state["calc_input"] == "0":
-                                    st.session_state["calc_input"] = btn_label
-                                else:
-                                    st.session_state["calc_input"] += btn_label
+                                if st.session_state["calc_input"] == "0": st.session_state["calc_input"] = btn_label
+                                else: st.session_state["calc_input"] += btn_label
                             st.rerun()
                 
-                # ショートカット
                 sc = st.columns(2)
                 if sc[0].button("ちょうど", use_container_width=True):
                     st.session_state["calc_input"] = str(total); st.rerun()
                 if sc[1].button("+1000", use_container_width=True):
                     st.session_state["calc_input"] = str(int(st.session_state["calc_input"]) + 1000); st.rerun()
 
-                # 計算ロジック
                 received = int(st.session_state["calc_input"])
                 change = received - total
 
@@ -273,19 +258,15 @@ if menu == "💰 レジ":
                     if change >= 0: st.success(f"お釣り: ¥{change:,}")
                     else: st.error(f"不足: ¥{abs(change):,}")
 
-                # 会計確定
                 if st.button("会計確定", type="primary", use_container_width=True):
                     if received < total: st.error("金額不足")
                     else:
                         c_names = [x['n'] for x in st.session_state["cart"]]
                         c_counts = Counter(c_names)
-                        
                         def checkout():
                             ws_s = get_worksheet(selected_class)
                             ws_m = get_worksheet("MENU")
-                            # ④ エラーハンドリングはexecute_db_actionで吸収
                             ws_s.append_row([datetime.now().strftime("%m/%d %H:%M"), "🔵 売上", "レジ", ",".join(c_names), total])
-                            
                             m_data = ws_m.get_all_values()
                             for idx, row in enumerate(m_data):
                                 if idx > 0 and row[0] == selected_class and row[1] in c_counts:
@@ -293,7 +274,6 @@ if menu == "💰 レジ":
                                     new_s = max(0, cur - c_counts[row[1]])
                                     ws_m.update_cell(idx + 1, 5, new_s)
                                     if new_s == 0: ws_m.update_cell(idx + 1, 4, "完売")
-                                    
                         st.session_state["cart"] = []; st.session_state["received_amount"] = 0
                         execute_db_action(checkout, "会計完了！", effect=True)
             
@@ -310,13 +290,10 @@ elif menu == "📦 在庫・売上":
     total_rev, sold_counts = calc_sales_stats(selected_class)
     st.markdown(f"<div class='sales-card'>💰 クラス総売上: <b>{total_rev:,}円</b></div>", unsafe_allow_html=True)
 
-    # ③ データフレームを使った一括編集
     raw_menu = get_raw_data("MENU")
-    # クラスのデータだけ抽出
     my_menu_indices = [i for i, r in enumerate(raw_menu) if i > 0 and r[0] == selected_class]
     
     if my_menu_indices:
-        # 編集用データの作成
         edit_data = []
         for idx in my_menu_indices:
             row = raw_menu[idx]
@@ -329,13 +306,15 @@ elif menu == "📦 在庫・売上":
                 "在庫数": current_stock,
                 "累計販売数": sold,
                 "売上高": sold * price,
-                "_row_idx": idx + 1 # スプレッドシートの行番号(1-based)
+                "_row_idx": idx + 1
             })
         
         df = pd.DataFrame(edit_data)
         
-        # DataEditorで表示（在庫数のみ編集可能にする）
-        st.info("💡 「在庫数」をダブルクリックすると直接編集できます。編集後は下部の「一括保存」を押してください。")
+        # ★修正: column_orderで表示順を指定し、_row_idxを隠す
+        display_cols = ["商品名", "単価", "在庫数", "累計販売数", "売上高"]
+        
+        st.info("💡 「在庫数」をダブルクリックして編集 -> 下の「一括保存」で確定")
         edited_df = st.data_editor(
             df,
             column_config={
@@ -344,32 +323,23 @@ elif menu == "📦 在庫・売上":
                 "在庫数": st.column_config.NumberColumn(min_value=0, step=1, required=True),
                 "累計販売数": st.column_config.NumberColumn(disabled=True),
                 "売上高": st.column_config.NumberColumn(disabled=True, format="¥%d"),
-                "_row_idx": st.column_config.Column(hidden=True) # 行番号は隠す
             },
+            column_order=display_cols, # 表示する列だけ指定
             hide_index=True,
             use_container_width=True,
             num_rows="fixed"
         )
         
         if st.button("💾 在庫数を一括保存", type="primary"):
-            # 変更があったかチェックして更新
             def bulk_update():
                 ws = get_worksheet("MENU")
-                # 全データをループして更新（差分更新が理想だが、安全のため表示データを正として保存）
-                # gspreadのbatch_updateを使うとさらに早いが、ここではupdate_cellのループで実装
-                # ※ 行数が少ない文化祭レベルならこれで十分。安全性を優先。
-                updates = []
+                # 行数が少ないのでループ更新で安全性を確保
                 for index, row in edited_df.iterrows():
-                    # 元のデータと比較して変更があれば...というロジックも可能だが
-                    # ここでは全て上書きする（DataEditorの値を正とする）
                     row_num = row["_row_idx"]
                     new_stock = row["在庫数"]
-                    # ステータスも自動更新
                     new_status = "完売" if new_stock == 0 else "販売中"
-                    
                     ws.update_cell(row_num, 5, int(new_stock))
                     ws.update_cell(row_num, 4, new_status)
-            
             execute_db_action(bulk_update, "在庫を一括更新しました！")
 
     else: st.info("メニューなし")
