@@ -71,7 +71,7 @@ CUSTOM_CSS = """
     </style>
 """
 
-st.set_page_config(page_title="文化祭レジPro", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="模擬店システム", layout="wide", initial_sidebar_state="auto")
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # セッション初期化
@@ -141,7 +141,7 @@ def calc_sales_stats(cls_name):
 # 🏫 認証 & UI
 # ==========================================
 if not st.session_state["is_logged_in"]:
-    st.title("🏫 文化祭レジPro")
+    st.title("🏫 模擬店システム")
     sel_cls = st.selectbox("クラス選択", list(CLASS_PASSWORDS.keys()))
     pw = st.text_input("パスワード", type="password")
     if st.button("ログイン", type="primary", use_container_width=True):
