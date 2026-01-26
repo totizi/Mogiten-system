@@ -16,6 +16,8 @@ CUSTOM_CSS = """
     <style>
     footer {visibility: hidden;}
     
+    /* === PC・共通設定 === */
+    
     /* 商品ボタン */
     div.stButton > button[kind="secondary"] {
         height: 85px !important; width: 100% !important;
@@ -54,33 +56,41 @@ CUSTOM_CSS = """
         color: #00cc96 !important; border: 1px solid #00cc96 !important; border-radius: 6px !important;
     }
     
-    /* 共通設定 */
+    [data-testid="column"] { min-width: 0 !important; flex: 1 1 auto !important; }
+    button:disabled { opacity: 0.3 !important; cursor: not-allowed !important; filter: grayscale(1); }
     .block-container { padding-top: 3.5rem !important; padding-bottom: 5rem !important; }
+    
     .sales-card {
         background: rgba(75, 156, 237, 0.1); padding: 15px;
         border-radius: 10px; border: 1px solid #4b9ced; margin-bottom: 20px;
     }
 
-    /* =========================================
-       📱 スマホ対応 (モバイルグリッド強制)
-       ========================================= */
-    @media only screen and (max-width: 600px) {
-        /* カラムの自動縦積みを無効化し、最小幅制限を解除 */
-        [data-testid="column"] {
-            min-width: 0 !important;
-            flex: 1 1 auto !important;
+    /* === 📱 スマホ専用レイアウト (強制グリッド化) === */
+    @media (max-width: 640px) {
+        /* 水平ブロックを強制的に「横並び & 折り返し許可」にする */
+        div[data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 0.5rem !important;
+        }
+        
+        /* カラムの幅を強制調整 */
+        div[data-testid="column"] {
             width: auto !important;
+            flex: 1 1 auto !important;
+            /* ここが重要: 
+               最小幅を約85pxにすることで、
+               - 電卓(3つ)は 85*3=255px < 画面幅 -> 横3列に並ぶ
+               - 商品(2つ)は 85*2=170px < 画面幅 -> 横2列に並ぶ
+               - メイン画面(レジ+カート)は コンテンツが多いので折り返されて縦になる
+            */
+            min-width: 85px !important; 
         }
         
-        /* ボタンの文字サイズなどを微調整して収まりよくする */
-        div.stButton > button {
-            padding: 2px !important;
-            font-size: 12px !important;
-        }
-        
-        /* 電卓ボタンの高さ調整 */
+        /* 電卓ボタンを少し小さくして収まりよくする */
         .calc-btn > button {
             height: 50px !important;
+            padding: 0px !important;
         }
     }
     </style>
@@ -219,8 +229,7 @@ if menu == "💰 レジ":
 
     @st.fragment
     def render_pos():
-        # メインレイアウト（レジ画面 vs カート画面）
-        # スマホではこれが縦に並ぶ（st.columnsのデフォルト挙動）
+        # スマホではこの2つが縦に並ぶはず（CSSのflex-wrapにより）
         c1, c2 = st.columns([1.5, 1])
         
         menu_data = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
@@ -231,9 +240,7 @@ if menu == "💰 レジ":
             if not menu_data: 
                 st.info("メニュー未登録")
             else:
-                # ★スマホで2列表示を実現するためのロジック★
-                # データを2つずつのペアにして、都度 st.columns(2) を呼ぶ
-                # これにより、スマホでも「この行は2列」と認識されやすくなる
+                # 2列ずつ描画
                 chunk_size = 2
                 for i in range(0, len(menu_data), chunk_size):
                     row_items = menu_data[i:i+chunk_size]
@@ -275,6 +282,7 @@ if menu == "💰 レジ":
                 current_val = st.session_state["calc_input"]
                 st.markdown(f"<div style='text-align:right; font-size:24px; font-weight:bold; background:#f0f2f6; padding:10px; border-radius:5px; margin-bottom:10px;'>¥ {int(current_val):,}</div>", unsafe_allow_html=True)
                 
+                # 電卓は3列
                 calc_cols = st.columns(3)
                 buttons = [["7", "8", "9"], ["4", "5", "6"], ["1", "2", "3"], ["0", "00", "C"]]
                 for row in buttons:
@@ -353,7 +361,7 @@ elif menu == "📦 在庫・売上":
         
         df = pd.DataFrame(edit_data)
         
-        # 表示する列を指定
+        # 表示列の設定
         display_cols = ["商品名", "単価", "在庫数", "累計販売数", "売上高"]
         
         st.info("💡 「在庫数」をダブルクリックして編集 -> 下の「一括保存」で確定")
