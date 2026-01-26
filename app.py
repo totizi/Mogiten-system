@@ -44,14 +44,44 @@ CUSTOM_CSS = """
         height: 60px !important; font-size: 20px !important; font-weight: bold !important; margin: 0px !important;
     }
 
-    /* 共通設定 */
-    [data-testid="column"] { min-width: 0 !important; flex: 1 1 auto !important; }
-    button:disabled { opacity: 0.3 !important; cursor: not-allowed !important; filter: grayscale(1); }
-    .block-container { padding-top: 3.5rem !important; padding-bottom: 5rem !important; }
+    /* リスト内ボタン */
+    div[data-testid="stExpander"] button[kind="primary"] {
+        height: 40px !important; min-height: 40px !important; width: auto !important;
+        background-color: #ff4b4b !important; color: white !important; border-radius: 6px !important;
+    }
+    div[data-testid="stExpander"] button[kind="secondary"] {
+        height: 40px !important; min-height: 40px !important; width: auto !important;
+        color: #00cc96 !important; border: 1px solid #00cc96 !important; border-radius: 6px !important;
+    }
     
+    /* 共通設定 */
+    .block-container { padding-top: 3.5rem !important; padding-bottom: 5rem !important; }
     .sales-card {
         background: rgba(75, 156, 237, 0.1); padding: 15px;
         border-radius: 10px; border: 1px solid #4b9ced; margin-bottom: 20px;
+    }
+
+    /* =========================================
+       📱 スマホ対応 (モバイルグリッド強制)
+       ========================================= */
+    @media only screen and (max-width: 600px) {
+        /* カラムの自動縦積みを無効化し、最小幅制限を解除 */
+        [data-testid="column"] {
+            min-width: 0 !important;
+            flex: 1 1 auto !important;
+            width: auto !important;
+        }
+        
+        /* ボタンの文字サイズなどを微調整して収まりよくする */
+        div.stButton > button {
+            padding: 2px !important;
+            font-size: 12px !important;
+        }
+        
+        /* 電卓ボタンの高さ調整 */
+        .calc-btn > button {
+            height: 50px !important;
+        }
     }
     </style>
 """
@@ -182,35 +212,47 @@ if budget > 0:
 st.divider()
 
 # ==========================================
-# 💰 レジ (POS) - ② 電卓UI実装
+# 💰 レジ (POS)
 # ==========================================
 if menu == "💰 レジ":
     st.subheader(f"💰 {selected_class} レジ")
 
     @st.fragment
     def render_pos():
+        # メインレイアウト（レジ画面 vs カート画面）
+        # スマホではこれが縦に並ぶ（st.columnsのデフォルト挙動）
         c1, c2 = st.columns([1.5, 1])
+        
         menu_data = [r for r in get_raw_data("MENU")[1:] if r[0] == selected_class]
         cart_counts = Counter([x['n'] for x in st.session_state["cart"]])
 
         # --- 商品選択エリア ---
         with c1: 
-            if not menu_data: st.info("メニュー未登録")
-            cols = st.columns(2)
-            for i, item in enumerate(menu_data):
-                n, p = item[1], int(item[2])
-                stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
-                status = item[3] if len(item) > 3 else "販売中"
-                rem_stock = max(0, stock - cart_counts[n])
-                is_disabled = (status == "完売" or stock <= 0 or rem_stock == 0)
-                
-                if status == "完売" or stock <= 0: label = f"🚫\n{n}\n(完売)"
-                elif rem_stock == 0: label = f"🚫\n{n}\n(上限)"
-                elif rem_stock <= 5: label = f"⚠️ 残り{rem_stock}\n{n}\n¥{p}"
-                else: label = f"{n}\n¥{p}\n(残{stock})"
+            if not menu_data: 
+                st.info("メニュー未登録")
+            else:
+                # ★スマホで2列表示を実現するためのロジック★
+                # データを2つずつのペアにして、都度 st.columns(2) を呼ぶ
+                # これにより、スマホでも「この行は2列」と認識されやすくなる
+                chunk_size = 2
+                for i in range(0, len(menu_data), chunk_size):
+                    row_items = menu_data[i:i+chunk_size]
+                    cols = st.columns(chunk_size)
+                    
+                    for j, item in enumerate(row_items):
+                        n, p = item[1], int(item[2])
+                        stock = int(item[4]) if len(item) > 4 and item[4].isdigit() else 0
+                        status = item[3] if len(item) > 3 else "販売中"
+                        rem_stock = max(0, stock - cart_counts[n])
+                        is_disabled = (status == "完売" or stock <= 0 or rem_stock == 0)
+                        
+                        if status == "完売" or stock <= 0: label = f"🚫\n{n}\n(完売)"
+                        elif rem_stock == 0: label = f"🚫\n{n}\n(上限)"
+                        elif rem_stock <= 5: label = f"⚠️ 残り{rem_stock}\n{n}\n¥{p}"
+                        else: label = f"{n}\n¥{p}\n(残{stock})"
 
-                if cols[i % 2].button(label, key=f"pos_{i}", use_container_width=True, disabled=is_disabled):
-                    st.session_state["cart"].append({"n": n, "p": p}); st.rerun()
+                        if cols[j].button(label, key=f"pos_{i+j}", use_container_width=True, disabled=is_disabled):
+                            st.session_state["cart"].append({"n": n, "p": p}); st.rerun()
 
         # --- カート & 電卓エリア ---
         with c2: 
@@ -282,7 +324,7 @@ if menu == "💰 レジ":
     render_pos()
 
 # ==========================================
-# 📦 在庫・売上 (③ 一括更新モード実装)
+# 📦 在庫・売上 (一括更新モード)
 # ==========================================
 elif menu == "📦 在庫・売上":
     st.subheader("📦 在庫・売上分析 & 一括更新")
@@ -311,7 +353,7 @@ elif menu == "📦 在庫・売上":
         
         df = pd.DataFrame(edit_data)
         
-        # ★修正: column_orderで表示順を指定し、_row_idxを隠す
+        # 表示する列を指定
         display_cols = ["商品名", "単価", "在庫数", "累計販売数", "売上高"]
         
         st.info("💡 「在庫数」をダブルクリックして編集 -> 下の「一括保存」で確定")
@@ -324,7 +366,7 @@ elif menu == "📦 在庫・売上":
                 "累計販売数": st.column_config.NumberColumn(disabled=True),
                 "売上高": st.column_config.NumberColumn(disabled=True, format="¥%d"),
             },
-            column_order=display_cols, # 表示する列だけ指定
+            column_order=display_cols,
             hide_index=True,
             use_container_width=True,
             num_rows="fixed"
@@ -333,7 +375,6 @@ elif menu == "📦 在庫・売上":
         if st.button("💾 在庫数を一括保存", type="primary"):
             def bulk_update():
                 ws = get_worksheet("MENU")
-                # 行数が少ないのでループ更新で安全性を確保
                 for index, row in edited_df.iterrows():
                     row_num = row["_row_idx"]
                     new_stock = row["在庫数"]
