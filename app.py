@@ -112,7 +112,7 @@ def calc_budget():
 # 🏫 認証 & UI
 # ==========================================
 if not st.session_state["is_logged_in"]:
-    st.title(f"🏫 {CLASS_NAME} 専用レジ")
+    st.title(f"🏫 {CLASS_NAME} ")
     st.markdown("自分の名前を選んでログインしてください。")
     
     # --- ★変更ポイント：名簿の動的読み込み ---
