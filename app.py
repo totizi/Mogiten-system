@@ -64,7 +64,7 @@ if "is_logged_in" not in st.session_state:
     })
 
 # ==========================================
-# 🚀 バックエンド (エラーハンドリング強化)
+# 🚀 バックエンド
 # ==========================================
 @st.cache_resource
 def get_gc():
@@ -73,19 +73,18 @@ def get_gc():
         return gspread.service_account_from_dict(json.loads(st.secrets["service_account_json"]))
     except Exception: return None
 
-# ★修正ポイント: キャッシュを外し、エラーを日本語で明確に出すようにしました
 def get_worksheet(tab_name):
     gc = get_gc()
     if not gc:
-        raise Exception("Googleスプレッドシートへの接続設定（API）に問題があります。")
+        raise Exception("Googleスプレッドシートへの接続設定に問題があります。")
     try:
         sh = gc.open(SPREADSHEET_NAME)
     except Exception:
-        raise Exception(f"「{SPREADSHEET_NAME}」というスプレッドシートが見つかりません。")
+        raise Exception(f"「{SPREADSHEET_NAME}」が見つかりません。")
     try:
         return sh.worksheet(tab_name)
     except Exception:
-        raise Exception(f"タブ「{tab_name}」が見つかりません！（半角・大文字小文字・スペースに注意してください）")
+        raise Exception(f"タブ「{tab_name}」が見つかりません！")
 
 @st.cache_data(ttl=60) 
 def get_raw_data(tab_name):
@@ -102,7 +101,6 @@ def execute_db_action(action_func, msg="完了", effect=False):
             st.session_state["received_amount"] = 0
             st.rerun()
     except Exception as e:
-        # NoneTypeエラーではなく、何が悪いかをズバリ表示します
         st.error(f"⚠️ エラーが発生しました: {e}")
 
 def calc_budget():
@@ -178,7 +176,9 @@ if menu == "💰 レジ会計":
 
     @st.fragment
     def render_pos():
-        c1, c2 = st.columns([1.5, 1])
+        # ★ここが変更点！ [1.5, 1] だったのを [1.1, 1] にしてメニュー側を狭くしました
+        c1, c2 = st.columns([1.1, 1]) 
+        
         menu_data = get_raw_data("MENU")[1:]
 
         with c1: 
