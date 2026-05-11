@@ -12,7 +12,6 @@ import pandas as pd
 SPREADSHEET_NAME = "模擬店データベース"
 CLASS_NAME = "3年7組"
 CLASS_PASSWORD = "377" # クラス共通パスワード
-STUDENT_IDS = [f"{i}番" for i in range(1, 36)] # 1番〜35番
 
 CUSTOM_CSS = """
     <style>
@@ -114,9 +113,18 @@ def calc_budget():
 # ==========================================
 if not st.session_state["is_logged_in"]:
     st.title(f"🏫 {CLASS_NAME} 専用レジ")
-    st.markdown("自分の出席番号を選んでログインしてください。")
+    st.markdown("自分の名前を選んでログインしてください。")
     
-    sel_user = st.selectbox("出席番号", STUDENT_IDS)
+    # --- ★変更ポイント：名簿の動的読み込み ---
+    roster_data = get_raw_data("名簿")
+    if len(roster_data) > 1:
+        # A列(インデックス0)のデータを取得し、空行を除外
+        student_list = [row[0] for row in roster_data[1:] if len(row) > 0 and row[0].strip() != ""]
+    else:
+        # 名簿シートがない、またはデータがない場合の予備（1〜35番）
+        student_list = [f"{i}番" for i in range(1, 36)]
+    
+    sel_user = st.selectbox("ログインユーザー", student_list)
     pw = st.text_input("クラスパスワード", type="password")
     
     if st.button("ログイン", type="primary", use_container_width=True):
@@ -142,7 +150,6 @@ st.sidebar.divider()
 if mode == "🛠 準備・前日":
     menu = st.sidebar.radio("メニュー", ["🍔 メニュー登録", "💸 経費記録", "✅ ToDo", "⚙️ 予算設定"])
 else:
-    # 在庫管理機能を削除したため、レジのみ表示
     menu = st.sidebar.radio("メニュー", ["💰 レジ会計"])
 
 if st.sidebar.button("ログアウト", use_container_width=True):
@@ -158,7 +165,7 @@ if budget > 0:
 st.divider()
 
 # ==========================================
-# 💰 レジ (POS) - 在庫機能撤廃版
+# 💰 レジ (POS)
 # ==========================================
 if menu == "💰 レジ会計":
     st.subheader("💰 レジ")
@@ -232,13 +239,12 @@ if menu == "💰 レジ会計":
     render_pos()
 
 # ==========================================
-# 💸 経費記録 (担当者自動入力)
+# 💸 経費記録
 # ==========================================
 elif menu == "💸 経費記録":
     st.subheader("💸 経費記録")
     with st.form("exp"):
         d = st.date_input("日付")
-        # 担当者を自動入力し、変更不可にする
         st.text_input("担当者 (自動入力)", value=current_user, disabled=True)
         i = st.text_input("品名")
         a = st.number_input("金額", min_value=0, step=1)
@@ -247,13 +253,12 @@ elif menu == "💸 経費記録":
             else: execute_db_action(lambda: get_worksheet("経費").append_row([d.strftime("%Y/%m/%d"), current_user, i, a]), "経費を登録しました")
 
 # ==========================================
-# ✅ ToDoリスト (担当者自動入力)
+# ✅ ToDoリスト
 # ==========================================
 elif menu == "✅ ToDo":
     st.subheader("✅ 準備ToDoリスト")
     with st.form("todo"):
         t = st.text_input("タスク内容")
-        # 担当者を自動入力し、変更不可にする
         st.text_input("担当者 (自動入力)", value=current_user, disabled=True)
         if st.form_submit_button("追加", use_container_width=True):
             if t: execute_db_action(lambda: get_worksheet("todo").append_row([datetime.now().strftime("%m/%d"), t, current_user, "未完了"]), "タスクを追加しました")
@@ -271,7 +276,7 @@ elif menu == "✅ ToDo":
     render_todo()
 
 # ==========================================
-# 🍔 メニュー登録 (在庫設定撤廃)
+# 🍔 メニュー登録
 # ==========================================
 elif menu == "🍔 メニュー登録":
     st.subheader("🍔 メニュー登録")
