@@ -64,7 +64,7 @@ if "is_logged_in" not in st.session_state:
     })
 
 # ==========================================
-# 🚀 バックエンド
+# 🚀 バックエンド (エラーハンドリング強化)
 # ==========================================
 @st.cache_resource
 def get_gc():
@@ -73,15 +73,23 @@ def get_gc():
         return gspread.service_account_from_dict(json.loads(st.secrets["service_account_json"]))
     except Exception: return None
 
-@st.cache_resource
+# ★修正ポイント: キャッシュを外し、エラーを日本語で明確に出すようにしました
 def get_worksheet(tab_name):
     gc = get_gc()
-    try: return gc.open(SPREADSHEET_NAME).worksheet(tab_name) if gc else None
-    except Exception: return None
+    if not gc:
+        raise Exception("Googleスプレッドシートへの接続設定（API）に問題があります。")
+    try:
+        sh = gc.open(SPREADSHEET_NAME)
+    except Exception:
+        raise Exception(f"「{SPREADSHEET_NAME}」というスプレッドシートが見つかりません。")
+    try:
+        return sh.worksheet(tab_name)
+    except Exception:
+        raise Exception(f"タブ「{tab_name}」が見つかりません！（半角・大文字小文字・スペースに注意してください）")
 
 @st.cache_data(ttl=60) 
 def get_raw_data(tab_name):
-    try: return get_worksheet(tab_name).get_all_values() if get_worksheet(tab_name) else []
+    try: return get_worksheet(tab_name).get_all_values()
     except Exception: return []
 
 def execute_db_action(action_func, msg="完了", effect=False):
@@ -93,8 +101,9 @@ def execute_db_action(action_func, msg="完了", effect=False):
             if effect: st.session_state["show_effect"] = True
             st.session_state["received_amount"] = 0
             st.rerun()
-    except gspread.exceptions.APIError: st.error("📡 通信エラー：再試行してください")
-    except Exception as e: st.error(f"⚠️ エラー: {e}")
+    except Exception as e:
+        # NoneTypeエラーではなく、何が悪いかをズバリ表示します
+        st.error(f"⚠️ エラーが発生しました: {e}")
 
 def calc_budget():
     try:
@@ -112,16 +121,13 @@ def calc_budget():
 # 🏫 認証 & UI
 # ==========================================
 if not st.session_state["is_logged_in"]:
-    st.title(f"🏫 {CLASS_NAME} ")
+    st.title(f"🏫 {CLASS_NAME} 専用レジ")
     st.markdown("自分の名前を選んでログインしてください。")
     
-    # --- ★変更ポイント：名簿の動的読み込み ---
     roster_data = get_raw_data("名簿")
     if len(roster_data) > 1:
-        # A列(インデックス0)のデータを取得し、空行を除外
         student_list = [row[0] for row in roster_data[1:] if len(row) > 0 and row[0].strip() != ""]
     else:
-        # 名簿シートがない、またはデータがない場合の予備（1〜35番）
         student_list = [f"{i}番" for i in range(1, 36)]
     
     sel_user = st.selectbox("ログインユーザー", student_list)
@@ -228,7 +234,6 @@ if menu == "💰 レジ会計":
                         c_names = [x['n'] for x in st.session_state["cart"]]
                         def checkout():
                             ws_r = get_worksheet("レジ")
-                            # レジ担当者を記録
                             ws_r.append_row([datetime.now().strftime("%m/%d %H:%M"), current_user, ",".join(c_names), total])
                         
                         st.session_state["cart"] = []; st.session_state["received_amount"] = 0
@@ -313,5 +318,8 @@ elif menu == "⚙️ 予算設定":
             
         nb = st.number_input("クラス予算額", value=curr, step=1000)
         if st.form_submit_button("更新", use_container_width=True):
-            ws = get_worksheet("BUDGET")
-            execute_db_action(lambda: ws.update_cell(2, 1, nb) if len(ws.get_all_values()) > 1 else ws.append_row([nb]), "予算を更新しました")
+            def update_budget():
+                ws = get_worksheet("BUDGET")
+                if len(ws.get_all_values()) > 1: ws.update_cell(2, 1, nb)
+                else: ws.append_row([nb])
+            execute_db_action(update_budget, "予算を更新しました")
