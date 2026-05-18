@@ -2,8 +2,6 @@ import streamlit as st
 from datetime import datetime
 import json
 import gspread
-import time
-from collections import Counter
 import pandas as pd
 
 # ==========================================
@@ -11,14 +9,12 @@ import pandas as pd
 # ==========================================
 SPREADSHEET_NAME = "模擬店データベース"
 CLASS_NAME = "3年7組"
-CLASS_PASSWORD = "377" # クラス共通パスワード
 
 CUSTOM_CSS = """
     <style>
     footer {visibility: hidden;}
     .block-container { padding-top: 3.5rem !important; padding-bottom: 5rem !important; }
     
-    /* 商品ボタン */
     div.stButton > button[kind="secondary"] {
         height: 85px !important; width: 100% !important;
         display: flex !important; flex-direction: column !important;
@@ -32,7 +28,6 @@ CUSTOM_CSS = """
     div[data-testid="column"]:nth-child(odd) div.stButton > button[kind="secondary"] { border-left-color: #4b9ced !important; }
     div[data-testid="column"]:nth-child(even) div.stButton > button[kind="secondary"] { border-left-color: #7d8ad4 !important; }
 
-    /* 会計・重要ボタン */
     div.stButton > button[kind="primary"] {
         min-height: 65px !important; width: 100% !important;
         font-size: 18px !important; font-weight: bold !important;
@@ -64,7 +59,7 @@ if "is_logged_in" not in st.session_state:
     })
 
 # ==========================================
-# 🚀 バックエンド
+# 🚀 バックエンド (速度特化・キャッシュ分割)
 # ==========================================
 @st.cache_resource
 def get_gc():
@@ -75,29 +70,42 @@ def get_gc():
 
 def get_worksheet(tab_name):
     gc = get_gc()
-    if not gc:
-        raise Exception("Googleスプレッドシートへの接続設定に問題があります。")
-    try:
-        sh = gc.open(SPREADSHEET_NAME)
-    except Exception:
-        raise Exception(f"「{SPREADSHEET_NAME}」が見つかりません。")
-    try:
-        return sh.worksheet(tab_name)
-    except Exception:
-        raise Exception(f"タブ「{tab_name}」が見つかりません！")
+    if not gc: raise Exception("Googleスプレッドシートへの接続設定に問題があります。")
+    try: return gc.open(SPREADSHEET_NAME).worksheet(tab_name)
+    except Exception: raise Exception(f"タブ「{tab_name}」が見つかりません！")
 
-@st.cache_data(ttl=60) 
-def get_raw_data(tab_name):
-    try: return get_worksheet(tab_name).get_all_values()
+# ★機能ごとにキャッシュを分割し、不要な読み込みを完全に排除
+@st.cache_data(ttl=300)
+def fetch_menu():
+    try: return get_worksheet("MENU").get_all_values()
     except Exception: return []
 
-def execute_db_action(action_func, msg="完了", effect=False):
+@st.cache_data(ttl=300)
+def fetch_expense():
+    try: return get_worksheet("経費").get_all_values()
+    except Exception: return []
+
+@st.cache_data(ttl=300)
+def fetch_todo():
+    try: return get_worksheet("todo").get_all_values()
+    except Exception: return []
+
+@st.cache_data(ttl=300)
+def fetch_budget():
+    try: return get_worksheet("BUDGET").get_all_values()
+    except Exception: return []
+
+@st.cache_data(ttl=600) # 名簿は滅多に変わらないのでキャッシュ時間を長めに
+def fetch_roster():
+    try: return get_worksheet("名簿").get_all_values()
+    except Exception: return []
+
+def execute_db_action(action_func, msg="完了", target_cache=None):
     try:
         with st.spinner("通信中..."):
             action_func()
-            get_raw_data.clear()
+            if target_cache: target_cache.clear() # 必要なデータだけを再読み込み
             st.session_state["flash_msg"] = f"✅ {msg}"
-            if effect: st.session_state["show_effect"] = True
             st.session_state["received_amount"] = 0
             st.rerun()
     except Exception as e:
@@ -106,44 +114,41 @@ def execute_db_action(action_func, msg="完了", effect=False):
 def calc_budget():
     try:
         budget = 30000
-        b_data = get_raw_data("BUDGET")
+        b_data = fetch_budget()
         if len(b_data) > 1 and str(b_data[1][0]).isdigit():
             budget = int(b_data[1][0])
             
-        expense_data = get_raw_data("経費")
+        expense_data = fetch_expense()
         expense = sum(int(str(r[3]).replace(',', '')) for r in expense_data[1:] if len(r) > 3 and str(r[3]).replace(',', '').isdigit())
         return budget, expense, budget - expense
     except: return 0, 0, 0
 
 # ==========================================
-# 🏫 認証 & UI
+# 🏫 認証 & UI (パスワード撤廃)
 # ==========================================
 if not st.session_state["is_logged_in"]:
     st.title(f"🏫 {CLASS_NAME} 専用レジ")
-    st.markdown("自分の名前を選んでログインしてください。")
+    st.markdown("自分の名前を選んでログインしてください。（パスワード不要）")
     
-    roster_data = get_raw_data("名簿")
+    roster_data = fetch_roster()
     if len(roster_data) > 1:
         student_list = [row[0] for row in roster_data[1:] if len(row) > 0 and row[0].strip() != ""]
     else:
         student_list = [f"{i}番" for i in range(1, 36)]
     
     sel_user = st.selectbox("ログインユーザー", student_list)
-    pw = st.text_input("クラスパスワード", type="password")
     
+    # パスワード入力を削除し、ボタン一発でログイン
     if st.button("ログイン", type="primary", use_container_width=True):
-        if pw.strip() == CLASS_PASSWORD:
-            st.session_state["is_logged_in"] = True
-            st.session_state["logged_user"] = sel_user
-            st.rerun()
-        else: st.error("パスワードが違います")
+        st.session_state["is_logged_in"] = True
+        st.session_state["logged_user"] = sel_user
+        st.rerun()
     st.stop()
 
 current_user = st.session_state["logged_user"]
 
 if st.session_state["flash_msg"]:
     st.success(st.session_state["flash_msg"])
-    if st.session_state["show_effect"]: st.balloons(); st.session_state["show_effect"] = False
     st.session_state["flash_msg"] = None
 
 st.sidebar.title(f"🏫 {CLASS_NAME}")
@@ -169,17 +174,17 @@ if budget > 0:
 st.divider()
 
 # ==========================================
-# 💰 レジ (POS)
+# 💰 レジ (POS) - 高速化版
 # ==========================================
 if menu == "💰 レジ会計":
     st.subheader("💰 レジ")
 
+    # @st.fragment により、商品・電卓ボタンを押しても画面全体はリロードされない（爆速UI維持）
     @st.fragment
     def render_pos():
-        # ★ここが変更点！ [1.5, 1] だったのを [1.1, 1] にしてメニュー側を狭くしました
         c1, c2 = st.columns([1.1, 1]) 
         
-        menu_data = get_raw_data("MENU")[1:]
+        menu_data = fetch_menu()[1:]
 
         with c1: 
             if not menu_data: st.info("メニュー未登録")
@@ -237,7 +242,8 @@ if menu == "💰 レジ会計":
                             ws_r.append_row([datetime.now().strftime("%m/%d %H:%M"), current_user, ",".join(c_names), total])
                         
                         st.session_state["cart"] = []; st.session_state["received_amount"] = 0
-                        execute_db_action(checkout, "会計完了！", effect=True)
+                        # ★高速化の要：会計後はメニュー等を再読み込みしない（target_cache=None）
+                        execute_db_action(checkout, "会計完了！", target_cache=None)
             
             if st.button("全クリア", use_container_width=True):
                 st.session_state.update({"cart":[], "received_amount":0}); st.rerun()
@@ -255,7 +261,7 @@ elif menu == "💸 経費記録":
         a = st.number_input("金額", min_value=0, step=1)
         if st.form_submit_button("登録", use_container_width=True):
             if not i or a <= 0: st.error("品名と金額を正しく入力してください")
-            else: execute_db_action(lambda: get_worksheet("経費").append_row([d.strftime("%Y/%m/%d"), current_user, i, a]), "経費を登録しました")
+            else: execute_db_action(lambda: get_worksheet("経費").append_row([d.strftime("%Y/%m/%d"), current_user, i, a]), "経費を登録しました", target_cache=fetch_expense)
 
 # ==========================================
 # ✅ ToDoリスト
@@ -266,17 +272,17 @@ elif menu == "✅ ToDo":
         t = st.text_input("タスク内容")
         st.text_input("担当者 (自動入力)", value=current_user, disabled=True)
         if st.form_submit_button("追加", use_container_width=True):
-            if t: execute_db_action(lambda: get_worksheet("todo").append_row([datetime.now().strftime("%m/%d"), t, current_user, "未完了"]), "タスクを追加しました")
+            if t: execute_db_action(lambda: get_worksheet("todo").append_row([datetime.now().strftime("%m/%d"), t, current_user, "未完了"]), "タスクを追加しました", target_cache=fetch_todo)
     st.divider()
     
     @st.fragment
     def render_todo():
-        raw = get_raw_data("todo")[1:]
+        raw = fetch_todo()[1:]
         active = [{"r": r, "idx": i+2} for i, r in enumerate(raw) if len(r) > 3 and "未完了" in r[3]]
         if active:
             upds = [item['idx'] for item in active if st.checkbox(f"{item['r'][1]} (担当:{item['r'][2]})", key=f"chk_{item['idx']}")]
             if upds and st.button("選択したタスクを完了にする", type="primary", use_container_width=True):
-                execute_db_action(lambda: [get_worksheet("todo").update_cell(rid, 4, "完了") for rid in upds], "タスクを完了にしました")
+                execute_db_action(lambda: [get_worksheet("todo").update_cell(rid, 4, "完了") for rid in upds], "タスクを完了にしました", target_cache=fetch_todo)
         else: st.info("現在残っているタスクはありません")
     render_todo()
 
@@ -289,19 +295,19 @@ elif menu == "🍔 メニュー登録":
         n = st.text_input("商品名")
         p = st.number_input("単価", min_value=0, step=10)
         if st.form_submit_button("追加", use_container_width=True):
-            if n and p > 0: execute_db_action(lambda: get_worksheet("MENU").append_row([n, p]), f"{n}を登録しました")
+            if n and p > 0: execute_db_action(lambda: get_worksheet("MENU").append_row([n, p]), f"{n}を登録しました", target_cache=fetch_menu)
             else: st.error("入力内容を確認してください")
     st.divider()
     
     with st.expander("📋 登録済みメニューの管理", expanded=True):
-        m_data = [{"d": r, "idx": i+2} for i, r in enumerate(get_raw_data("MENU")[1:]) if len(r) >= 2]
+        m_data = [{"d": r, "idx": i+2} for i, r in enumerate(fetch_menu()[1:]) if len(r) >= 2]
         for item in m_data:
             row, idx = item["d"], item["idx"]
             c1, c2 = st.columns([3, 1])
             c1.write(f"・**{row[0]}** (¥{row[1]})")
             if st.session_state["del_confirm_idx"] == idx:
                 cy, cn = c2.columns(2)
-                if cy.button("はい", key=f"y_{idx}", type="primary"): execute_db_action(lambda: get_worksheet("MENU").delete_rows(idx), "削除しました"); st.session_state["del_confirm_idx"] = None
+                if cy.button("はい", key=f"y_{idx}", type="primary"): execute_db_action(lambda: get_worksheet("MENU").delete_rows(idx), "削除しました", target_cache=fetch_menu); st.session_state["del_confirm_idx"] = None
                 if cn.button("いいえ", key=f"n_{idx}", type="secondary"): st.session_state["del_confirm_idx"] = None; st.rerun()
             else:
                 if c2.button("削除", key=f"d_{idx}"): st.session_state["del_confirm_idx"] = idx; st.rerun()
@@ -313,7 +319,7 @@ elif menu == "⚙️ 予算設定":
     st.subheader("⚙️ 予算設定")
     with st.form("bud"):
         curr = 30000
-        b_data = get_raw_data("BUDGET")
+        b_data = fetch_budget()
         if len(b_data) > 1 and str(b_data[1][0]).isdigit(): curr = int(b_data[1][0])
             
         nb = st.number_input("クラス予算額", value=curr, step=1000)
@@ -322,4 +328,4 @@ elif menu == "⚙️ 予算設定":
                 ws = get_worksheet("BUDGET")
                 if len(ws.get_all_values()) > 1: ws.update_cell(2, 1, nb)
                 else: ws.append_row([nb])
-            execute_db_action(update_budget, "予算を更新しました")
+            execute_db_action(update_budget, "予算を更新しました", target_cache=fetch_budget)
